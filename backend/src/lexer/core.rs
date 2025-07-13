@@ -103,7 +103,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                     contents,
                     miette::SourceSpan::new(i.into(), contents[i..i + 3].chars().count()),
                     "Not supported",
-                    format!("Operands <<= and >>= are not supported"),
+                    "Operands <<= and >>= are not supported".to_string(),
                 )
                 .into());
             }

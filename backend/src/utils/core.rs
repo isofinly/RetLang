@@ -7,7 +7,7 @@ pub struct Loc<'a> {
     pub line_offset: usize,
 }
 
-impl<'a> fmt::Display for Loc<'a> {
+impl fmt::Display for Loc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

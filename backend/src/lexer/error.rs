@@ -26,7 +26,7 @@ impl LexError {
         message: impl Into<String>,
     ) -> Self {
         Self {
-            source_code: NamedSource::new(filename.to_owned(), full_src.to_owned()),
+            source_code: NamedSource::new(filename, full_src.to_owned()),
             span,
             label: label.into(),
             message: message.into(),
