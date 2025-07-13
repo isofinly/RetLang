@@ -1,0 +1,5 @@
+gadget main:
+    print("Goodbye!")
+ret
+
+stack: [main, aboba]

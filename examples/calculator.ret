@@ -1,0 +1,60 @@
+// Calculator using pure return-oriented programming
+// No traditional conditionals or loops!
+
+gadget main:
+    push read_input
+ret
+
+gadget read_input:
+    input_line = read()  // Read a line
+    if input_line == "exit" then stack[0] = exit_program
+    if input_line != "exit" then stack[0] = parse_input
+ret
+
+gadget parse_input:
+    // Parse "num1 op num2" format
+    tokens = split(input_line, " ")
+    load left_num tokens[0]
+    load operator tokens[1]
+    load right_num tokens[2]
+
+    // Set up next gadget based on operator
+    if operator == "+" then stack[0] = add_numbers
+    if operator == "-" then stack[0] = sub_numbers
+    if operator == "*" then stack[0] = mul_numbers
+    if operator == "/" then stack[0] = div_numbers
+ret
+
+gadget add_numbers:
+    result = left_num + right_num
+    push display_result
+ret
+
+gadget sub_numbers:
+    result = left_num - right_num
+    push display_result
+ret
+
+gadget mul_numbers:
+    result = left_num * right_num
+    push display_result
+ret
+
+gadget div_numbers:
+    if right_num == 0 then result = "ERROR"
+    if right_num != 0 then result = left_num / right_num
+    push display_result
+ret
+
+gadget display_result:
+    print("Result: ")
+    print(result)
+    push read_input  // Loop back to read more input
+ret
+
+gadget exit_program:
+    print("Goodbye!")
+ret
+
+// Initial execution stack:
+stack: [main]
