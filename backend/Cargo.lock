@@ -661,7 +661,6 @@ dependencies = [
  "clap",
  "hex",
  "miette",
- "regex",
  "serde",
  "serde_json",
  "serde_with",

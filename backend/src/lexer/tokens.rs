@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! All lexical categories recognised by the lexer.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,15 +7,12 @@ pub struct Token {
     pub column: usize, // 1-based (UTF-8 byte offset is also fine)
 }
 
-/// “Kind” is the part the parser actually cares about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    /*──────────── Atoms ────────────*/
     Identifier(String),
     Int(i64),
     Str(String),
 
-    /*──────────── Keywords ─────────*/
     Gadget,    // gadget
     Stack,     // stack
     Ret,       // ret
@@ -29,29 +25,26 @@ pub enum TokenKind {
     If,        // if
     Then,      // then
 
-    /*──────────── Punctuation ──────*/
-    Comma,     // ,
-    Colon,     // :
-    Semicolon, // ;   (only appears once, after stack_init)
-    LBracket,  // [
-    RBracket,  // ]
-    LParen,    // (   (you may drop these if you really never need them)
-    RParen,    // )
+    Comma,    // ,
+    Colon,    // :
+    LBracket, // [
+    RBracket, // ]
+    LParen,   // (
+    RParen,   // )
 
-    /*──────────── Operators ────────*/
-    Assign, // =
-    // arithmetic / bit-wise
+    Assign,  // =
     Plus,    // +
     Minus,   // -
     Star,    // *
     Slash,   // /
     Percent, // %
-    Amp,     // &
-    Pipe,    // |
-    Caret,   // ^
-    Shl,     // <<
-    Shr,     // >>
-    // comparison
+
+    Amp,   // &
+    Pipe,  // |
+    Caret, // ^
+    Shl,   // <<
+    Shr,   // >>
+
     EqEq,  // ==
     NotEq, // !=
     Lt,    // <
@@ -59,6 +52,30 @@ pub enum TokenKind {
     Gt,    // >
     Ge,    // >=
 
-    /*──────────── Misc ─────────────*/
-    Eof, // virtual token injected by the lexer
+    Eof,
+}
+
+impl Token {
+    pub fn at(kind: TokenKind, src: &str, offset: usize) -> Self {
+        let (line, column) = byte_offset_to_line_col(src, offset);
+        Self { kind, line, column }
+    }
+}
+
+fn byte_offset_to_line_col(src: &str, offset: usize) -> (usize, usize) {
+    let clamped_offset = offset.min(src.len());
+
+    let newline_count = src[..clamped_offset]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count();
+    let line = newline_count + 1;
+
+    let last_nl = src[..clamped_offset]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let column = clamped_offset - last_nl + 1; // 1-based
+
+    (line, column)
 }
