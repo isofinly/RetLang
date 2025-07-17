@@ -11,6 +11,7 @@ gadget_body = { instruction } , return_stmt ;
 
 (* Instructions can only manipulate data, not control flow *)
 instruction = assignment
+            | call
             | stack_op
             | arithmetic
             | memory_op
@@ -51,6 +52,7 @@ expression = literal
            | memory_ref
            | stack_ref
            | binary_expr
+           | call
            ;
 
 memory_ref = "[" , expression , "]" ;

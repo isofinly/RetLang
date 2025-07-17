@@ -1,3 +1,3 @@
-mod ast;
+pub mod ast;
 pub mod core;
-mod semantics;
+pub mod semantics;

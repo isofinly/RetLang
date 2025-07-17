@@ -1,6 +1,7 @@
 mod compiler;
 mod lexer;
 mod linker;
+mod parser;
 mod utils;
 
 use clap::{Parser, Subcommand};
@@ -60,7 +61,9 @@ fn main() -> Result<()> {
         Cmd::Compile { input, output } => {
             let src = std::fs::read_to_string(&input).into_diagnostic()?;
             let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
-            let obj_bin = compiler::core::compile(tokens);
+            let ast = parser::core::parse(tokens.as_slice())?;
+            println!("{:?}", ast);
+            let obj_bin = compiler::core::compile(ast);
             std::fs::write(&output, obj_bin).into_diagnostic()?;
             println!("wrote {}", output.display());
         }

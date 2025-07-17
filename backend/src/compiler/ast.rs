@@ -29,6 +29,7 @@ pub enum Instruction {
     Arithmetic(Arithmetic),
     MemoryOp(MemoryOp),
     ConditionalMod(ConditionalMod),
+    Call(Call),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +123,7 @@ pub enum Expression {
     MemoryRef(Box<Expression>), // [expr]
     StackRef(Box<Expression>),  // stack[expr]
     Binary(Box<BinaryExpr>),
+    Call(Box<Call>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -152,4 +154,10 @@ pub struct StackInit {
 pub enum Literal {
     Int(i64),
     Str(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Call {
+    pub callee: Identifier,
+    pub args: Vec<Expression>,
 }
