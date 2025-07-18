@@ -52,13 +52,16 @@ expression = literal
            | memory_ref
            | stack_ref
            | binary_expr
+           | unary_expr
            | call
            ;
 
 memory_ref = "[" , expression , "]" ;
 stack_ref = "stack" , "[" , expression , "]" ;
 
-binary_expr = expression , ( "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" ) , expression ;
+binary_expr = expression , ( "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" ) , expression ;
+
+unary_expr = "!" , expression ;
 
 (* Initial stack setup - this determines execution order *)
 stack_init = "stack" , ":" , "[" , { identifier } , "]" ;

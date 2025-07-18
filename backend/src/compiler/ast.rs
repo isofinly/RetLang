@@ -123,6 +123,7 @@ pub enum Expression {
     MemoryRef(Box<Expression>), // [expr]
     StackRef(Box<Expression>),  // stack[expr]
     Binary(Box<BinaryExpr>),
+    Unary(Box<UnaryExpr>),
     Call(Box<Call>),
 }
 
@@ -131,6 +132,12 @@ pub struct BinaryExpr {
     pub lhs: Expression,
     pub op: BinOp,
     pub rhs: Expression,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnaryExpr {
+    pub op: UnaryOp,
+    pub operand: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +150,11 @@ pub enum BinOp {
     And,
     Or,
     Xor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
 }
 
 #[derive(Debug, Clone, PartialEq)]

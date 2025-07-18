@@ -256,7 +256,9 @@ impl<'t> Parser<'t> {
 
         let val = if matches!(
             self.peek(),
-            Some(TokenKind::Int(_) | TokenKind::Identifier(_) | TokenKind::LBracket)
+            Some(
+                TokenKind::Int(_) | TokenKind::Identifier(_) | TokenKind::LBracket | TokenKind::Not
+            )
         ) || self.is_stack_expression()
         {
             Some(self.expression()?)
@@ -337,6 +339,13 @@ impl<'t> Parser<'t> {
                 let idx = self.expression()?;
                 self.expect(TokenKind::RBracket)?;
                 Expression::StackRef(Box::new(idx))
+            }
+            Some(TokenKind::Not) => {
+                let operand = self.primary()?;
+                Expression::Unary(Box::new(UnaryExpr {
+                    op: UnaryOp::Not,
+                    operand,
+                }))
             }
             _ => return Err(miette!("unexpected token in expression")),
         })

@@ -38,6 +38,7 @@ pub enum TokenKind {
     Star,    // *
     Slash,   // /
     Percent, // %
+    Not,     // !
 
     Amp,   // &
     Pipe,  // |
@@ -58,6 +59,7 @@ pub enum TokenKind {
 impl Token {
     pub fn at(kind: TokenKind, src: &str, offset: usize) -> Self {
         let (line, column) = crate::utils::loc::byte_offset_to_line_col(src, offset);
+
         Self { kind, line, column }
     }
 }
