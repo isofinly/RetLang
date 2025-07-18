@@ -150,6 +150,8 @@ pub enum BinOp {
     And,
     Or,
     Xor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
