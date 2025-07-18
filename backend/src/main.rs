@@ -22,17 +22,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    Lex {
-        input: PathBuf,
-    },
+    #[command(visible_aliases = &["lx", "lexit"])]
+    Lex { input: PathBuf },
+    #[command(visible_aliases = &[ "c", "cmp"])]
     Compile {
         input: PathBuf,
-        #[arg(short, long, default_value = "out.o")]
+        #[arg(short, long, default_value = "./build/out.o")]
         output: PathBuf,
     },
+    #[command(visible_aliases = &["ld", "lnk"])]
     Link {
         objects: Vec<PathBuf>,
-        #[arg(short, long, default_value = "a.out")]
+        #[arg(short, long, default_value = "./build/a.out")]
         output: PathBuf,
     },
 }

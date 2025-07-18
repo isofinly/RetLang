@@ -1,4 +1,4 @@
-use crate::{compiler::ast::Program, lexer::tokens::Token};
+use crate::compiler::ast::Program;
 
 pub fn compile(tokens: Program) -> Vec<u8> {
     // TODO: real compiler -> returns “object” bytes
