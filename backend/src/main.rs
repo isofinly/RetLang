@@ -13,7 +13,7 @@ use std::path::PathBuf;
     name = "ret-lang",
     version = "0.1.0",
     author = "isofinly",
-    about = "RET-lang compiler"
+    about = "RET-lang toolchain"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -27,13 +27,13 @@ enum Cmd {
     #[command(visible_aliases = &[ "c", "cmp"])]
     Compile {
         input: PathBuf,
-        #[arg(short, long, default_value = "./build/out.o")]
+        #[arg(short, long, default_value = "./.build/out.o")]
         output: PathBuf,
     },
     #[command(visible_aliases = &["ld", "lnk"])]
     Link {
         objects: Vec<PathBuf>,
-        #[arg(short, long, default_value = "./build/a.out")]
+        #[arg(short, long, default_value = "./.build/a.out")]
         output: PathBuf,
     },
 }
@@ -64,7 +64,10 @@ fn main() -> Result<()> {
             let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
             let ast = parser::core::parse(tokens.as_slice())?;
             println!("{:?}", ast);
-            let obj_bin = compiler::core::compile(ast);
+            let obj_bin = compiler::core::compile(ast)?;
+            if !output.exists() {
+                std::fs::create_dir_all(output.parent().unwrap()).into_diagnostic()?;
+            }
             std::fs::write(&output, obj_bin).into_diagnostic()?;
             println!("wrote {}", output.display());
         }

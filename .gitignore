@@ -181,3 +181,4 @@ config.env
 *.env
 !example.env
 .vscode
+.build

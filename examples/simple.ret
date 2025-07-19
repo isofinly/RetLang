@@ -2,4 +2,7 @@ gadget main:
     print("Goodbye!")
 ret
 
+gadget aboba:
+ret
+
 stack: [main, aboba]
