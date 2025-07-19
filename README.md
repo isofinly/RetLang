@@ -1,5 +1,14 @@
 # Return Oriented Programming Language
 
+Language inspired by ROP concept with mix of assembly, C.
+
+## Targets
+
+- Any target that is supported by C
+- WASM
+
+## Grammar
+
 ```ebnf
 
 program = { gadget_def } , stack_init ;
@@ -77,3 +86,7 @@ digit = "0" | ... | "9" ;
 
 comment = "//" , { ? any char except newline ? } ;
 ```
+
+## License
+
+See [LICENSE](LICENSE).
