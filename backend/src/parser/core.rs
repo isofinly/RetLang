@@ -149,7 +149,12 @@ impl<'t> Parser<'t> {
                 Some(TokenKind::Assign) => Instruction::Assignment(self.assignment()?),
                 Some(TokenKind::LParen) => Instruction::Call(self.call()?),
                 Some(k) if self.is_arith_op(k) => Instruction::Arithmetic(self.arithmetic()?),
-                _ => return Err(miette!("Invalid instruction starting with identifier")),
+                _ => {
+                    return Err(miette!(
+                        "Invalid instruction starting with identifier {:?}",
+                        self.peek_second()
+                    ));
+                }
             },
             Some(TokenKind::Push | TokenKind::Pop | TokenKind::Peek | TokenKind::StackSwap) => {
                 Instruction::StackOp(self.stack_op()?)
