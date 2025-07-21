@@ -39,6 +39,12 @@ impl<'t> Parser<'t> {
             _ => Err(miette!("expected identifier")),
         }
     }
+    fn expect_string(&mut self) -> Result<String> {
+        match self.next() {
+            Some(TokenKind::Str(s)) => Ok(s.clone()),
+            _ => Err(miette!("expected string literal")),
+        }
+    }
 
     fn is_arith_op(&mut self, kind: &TokenKind) -> bool {
         matches!(
@@ -69,6 +75,11 @@ impl<'t> Parser<'t> {
     }
 
     fn program(&mut self) -> Result<Program> {
+        let mut externals = Vec::new();
+        while matches!(self.peek(), Some(TokenKind::External)) {
+            externals.push(self.external()?);
+        }
+
         let mut gadgets = Vec::new();
 
         while matches!(self.peek(), Some(TokenKind::Gadget)) {
@@ -79,9 +90,33 @@ impl<'t> Parser<'t> {
         self.expect(TokenKind::Eof)?;
 
         Ok(Program {
+            headers: externals,
             gadgets,
             stack_init,
         })
+    }
+
+    fn external(&mut self) -> Result<Header> {
+        self.expect(TokenKind::External)?;
+        self.expect(TokenKind::Colon)?;
+        let header = match self.peek() {
+            Some(TokenKind::Lt) => {
+                self.expect(TokenKind::Lt)?;
+                let mut parts: Vec<String> = vec![self.expect_identifier()?];
+                while matches!(self.peek(), Some(TokenKind::Dot)) {
+                    self.expect(TokenKind::Dot)?;
+                    parts.push(self.expect_identifier()?);
+                }
+                self.expect(TokenKind::Gt)?;
+                Header::System(parts)
+            }
+            Some(TokenKind::Str(_)) => {
+                let path = self.expect_string()?;
+                Header::User(path)
+            }
+            _ => return Err(miette!("expected '<' or '\"' after 'external:'")),
+        };
+        Ok(header)
     }
 
     fn gadget_definition(&mut self) -> Result<GadgetDef> {
@@ -185,8 +220,10 @@ impl<'t> Parser<'t> {
         let dest = self.expect_identifier()?;
         let op1 = self.arith_op()?;
         self.expect(TokenKind::Assign)?;
+        // TODO: Change to expression??
         let lhs = self.primary()?;
         let op2 = self.arith_op()?;
+        // TODO: Change to expression??
         let rhs = self.primary()?;
         Ok(Arithmetic {
             dest,
@@ -395,6 +432,136 @@ impl<'t> Parser<'t> {
 mod tests {
     use super::*;
 
+    fn make_token(kind: TokenKind, line: usize, column: usize) -> Token {
+        Token { kind, line, column }
+    }
+
+    #[test]
+    fn test_parse_external_header_1() -> miette::Result<()> {
+        let tokens = vec![
+            make_token(TokenKind::External, 2, 1),
+            make_token(TokenKind::Colon, 2, 9),
+            make_token(TokenKind::Lt, 2, 11),
+            make_token(TokenKind::Identifier("aboba".to_string()), 2, 12),
+            make_token(TokenKind::Dot, 2, 17),
+            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
+            make_token(TokenKind::Gt, 2, 19),
+            make_token(TokenKind::Stack, 3, 1),
+            make_token(TokenKind::Colon, 3, 7),
+            make_token(TokenKind::LBracket, 3, 8),
+            make_token(TokenKind::RBracket, 3, 9),
+            make_token(TokenKind::Eof, 3, 10),
+        ];
+        let ast = parse(&tokens)?;
+
+        let expected = Program {
+            headers: vec![Header::System(vec!["aboba".to_string(), "h".to_string()])],
+            gadgets: vec![],
+            stack_init: StackInit { initial: vec![] },
+        };
+
+        assert_eq!(ast, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_incorrect_external_header() -> miette::Result<()> {
+        let tokens = vec![
+            make_token(TokenKind::External, 2, 1),
+            make_token(TokenKind::Colon, 2, 9),
+            make_token(TokenKind::Identifier("aboba.h".to_string()), 2, 11),
+            make_token(TokenKind::Stack, 3, 1),
+            make_token(TokenKind::Colon, 3, 7),
+            make_token(TokenKind::LBracket, 3, 8),
+            make_token(TokenKind::RBracket, 3, 9),
+            make_token(TokenKind::Eof, 3, 10),
+        ];
+        let res = parse(&tokens);
+
+        assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_multiple_external_headers() -> miette::Result<()> {
+        let tokens = vec![
+            make_token(TokenKind::External, 2, 1),
+            make_token(TokenKind::Colon, 2, 9),
+            make_token(TokenKind::Lt, 2, 11),
+            make_token(TokenKind::Identifier("aboba".to_string()), 2, 12),
+            make_token(TokenKind::Dot, 2, 17),
+            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
+            make_token(TokenKind::Gt, 2, 19),
+            make_token(TokenKind::External, 3, 1),
+            make_token(TokenKind::Colon, 3, 9),
+            make_token(TokenKind::Lt, 3, 11),
+            make_token(TokenKind::Identifier("aboba2".to_string()), 3, 12),
+            make_token(TokenKind::Dot, 3, 18),
+            make_token(TokenKind::Identifier("h".to_string()), 3, 19),
+            make_token(TokenKind::Gt, 3, 20),
+            make_token(TokenKind::Stack, 4, 1),
+            make_token(TokenKind::Colon, 4, 7),
+            make_token(TokenKind::LBracket, 4, 8),
+            make_token(TokenKind::RBracket, 4, 9),
+            make_token(TokenKind::Eof, 4, 10),
+        ];
+        let ast = parse(&tokens)?;
+
+        let expected = Program {
+            headers: vec![
+                Header::System(vec!["aboba".to_string(), "h".to_string()]),
+                Header::System(vec!["aboba2".to_string(), "h".to_string()]),
+            ],
+            gadgets: vec![],
+            stack_init: StackInit { initial: vec![] },
+        };
+
+        assert_eq!(ast, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_external_with_gadget() -> miette::Result<()> {
+        let tokens = vec![
+            make_token(TokenKind::External, 2, 1),
+            make_token(TokenKind::Colon, 2, 9),
+            make_token(TokenKind::Lt, 2, 11),
+            make_token(TokenKind::Identifier("stdio".to_string()), 2, 12),
+            make_token(TokenKind::Dot, 2, 17),
+            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
+            make_token(TokenKind::Gt, 2, 19),
+            make_token(TokenKind::Gadget, 4, 1),
+            make_token(TokenKind::Identifier("main".to_string()), 4, 8),
+            make_token(TokenKind::Colon, 4, 12),
+            make_token(TokenKind::Ret, 5, 5),
+            make_token(TokenKind::Stack, 7, 1),
+            make_token(TokenKind::Colon, 7, 7),
+            make_token(TokenKind::LBracket, 7, 8),
+            make_token(TokenKind::Identifier("main".to_string()), 7, 9),
+            make_token(TokenKind::RBracket, 7, 13),
+            make_token(TokenKind::Eof, 7, 14),
+        ];
+        let ast = parse(&tokens)?;
+
+        let expected = Program {
+            headers: vec![Header::System(vec!["stdio".to_string(), "h".to_string()])],
+            gadgets: vec![GadgetDef {
+                doc: None,
+                name: "main".to_string(),
+                body: GadgetBody {
+                    instructions: vec![],
+                    ret: ReturnStmt { value: None },
+                },
+            }],
+            stack_init: StackInit {
+                initial: vec!["main".to_string()],
+            },
+        };
+
+        assert_eq!(ast, expected);
+        Ok(())
+    }
+
     #[test]
     fn valid_program_minimal() {
         let input = [
@@ -427,6 +594,7 @@ mod tests {
         let expected = Program {
             stack_init: StackInit { initial: vec![] },
             gadgets: vec![],
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -539,6 +707,7 @@ mod tests {
             stack_init: StackInit {
                 initial: vec!["a".to_string(), "b".to_string()],
             },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -645,6 +814,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -722,6 +892,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -836,6 +1007,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -960,6 +1132,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1043,6 +1216,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1247,6 +1421,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1383,6 +1558,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1556,6 +1732,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1657,6 +1834,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1832,6 +2010,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -1936,6 +2115,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -2123,6 +2303,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -2382,6 +2563,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -2577,6 +2759,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -2812,6 +2995,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -2961,6 +3145,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -3054,6 +3239,7 @@ mod tests {
                 },
             }],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -3239,6 +3425,7 @@ mod tests {
                 },
             ],
             stack_init: StackInit { initial: vec![] },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 
@@ -3734,6 +3921,7 @@ mod tests {
             stack_init: StackInit {
                 initial: vec!["t".to_string(), "u".to_string(), "v".to_string()],
             },
+            headers: vec![],
         };
         let program = parse(&input).unwrap();
 

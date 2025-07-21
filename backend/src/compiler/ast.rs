@@ -4,7 +4,15 @@ use std::boxed::Box;
 pub type Identifier = String;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Header {
+    System(Vec<Identifier>), // <part1.part2...>
+    User(String),            // "full/path.h"
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    /// External C headers
+    pub headers: Vec<Header>,
     pub gadgets: Vec<GadgetDef>,
     pub stack_init: StackInit,
 }

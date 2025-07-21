@@ -54,6 +54,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                 "load" => Load,
                 "if" => If,
                 "then" => Then,
+                "external" => External,
                 _ => Identifier(text.to_owned()),
             };
 
@@ -146,6 +147,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                     '^' => (Caret, 1),
                     '<' => (Lt, 1),
                     '>' => (Gt, 1),
+                    '.' => (Dot, 1),
                     _ => {
                         let span = miette::SourceSpan::new(i.into(), 1);
                         return Err(LexError::new(
@@ -171,6 +173,174 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
 
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_external_token_header_1() {
+        let input = "external: <aboba.h>";
+        let tokens = lex("testing.ret", input).unwrap();
+
+        let expected = vec![
+            Token {
+                kind: TokenKind::External,
+                line: 1,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 1,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 1,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba".to_string()),
+                line: 1,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 1,
+                column: 17,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 1,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 1,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 1,
+                column: 20,
+            },
+        ];
+
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_external_token_header_2() {
+        let input = r#"external: "aboba.h""#;
+        let tokens = lex("testing.ret", input).unwrap();
+
+        let expected = vec![
+            Token {
+                kind: TokenKind::External,
+                line: 1,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 1,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Str("aboba.h".to_string()),
+                line: 1,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 1,
+                column: 20,
+            },
+        ];
+
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_multiple_external_headers() {
+        let input = "external: <aboba.h>\nexternal: <aboba2.h>";
+        let tokens = lex("testing.ret", input).unwrap();
+
+        let expected = vec![
+            Token {
+                kind: TokenKind::External,
+                line: 1,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 1,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 1,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba".to_string()),
+                line: 1,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 1,
+                column: 17,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 1,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 1,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::External,
+                line: 2,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 2,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 2,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba2".to_string()),
+                line: 2,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 2,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 2,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 2,
+                column: 20,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 2,
+                column: 21,
+            },
+        ];
+
+        assert_eq!(tokens, expected);
+    }
 
     #[test]
     fn valid_keywords_all() {

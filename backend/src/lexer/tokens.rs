@@ -13,6 +13,9 @@ pub enum TokenKind {
     Int(i64),
     Str(String),
 
+    External,
+    Dot,
+
     Gadget,    // gadget
     Stack,     // stack
     Ret,       // ret

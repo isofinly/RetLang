@@ -1,6 +1,10 @@
 # Return Oriented Programming Language
 
-Language inspired by ROP concept with mix of assembly, C.
+Language inspired by ROP concept with mix of assembly syntax and C headers.
+
+It supports linking with external C libraries by either specifying the library name or providing library path to CLI.
+
+Due to simplistic nature of the language, support for imports and external gadgets is not planned.
 
 ## Targets
 
@@ -10,6 +14,12 @@ Language inspired by ROP concept with mix of assembly, C.
 ## Grammar
 
 ```ebnf
+
+header_name = identifier , { "." , identifier } ;
+
+external = "external" , ":" ,
+                 ( "<" , header_name , ">"
+                 | '"' , header_name , '"' ) ;
 
 program = { gadget_def } , stack_init ;
 
@@ -27,35 +37,29 @@ instruction = assignment
             | conditional_mod
             ;
 
-(* Assignments modify registers/variables *)
 assignment = identifier , "=" , expression ;
 
-(* Stack operations - the heart of ROP *)
 stack_op = "push" , expression
          | "pop" , identifier
          | "peek" , identifier , "[" , expression "]"  (* peek at stack offset *)
          | "stack_swap" , expression , expression      (* swap stack positions *)
          ;
 
-(* Arithmetic operations *)
 arithmetic = identifier , arith_op , "=" , expression , arith_op , expression ;
 arith_op = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" ;
 
-(* Memory operations *)
 memory_op = "store" , expression , expression  (* store value at address *)
           | "load" , identifier , expression   (* load from address *)
           ;
 
-(* Conditional modifications - can only affect data, not flow *)
 conditional_mod = "if" , condition , "then" , identifier , "=" , expression ;
 
 condition = expression , comp_op , expression ;
 comp_op = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
 
-(* The key: every gadget MUST end with a return that pops next address *)
+(* every gadget MUST end with a return that pops next address *)
 return_stmt = "ret" , [ expression ] ;  (* optional value to push before returning *)
 
-(* Expressions *)
 expression = literal
            | identifier
            | memory_ref
@@ -72,10 +76,9 @@ binary_expr = expression , ( "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<
 
 unary_expr = "!" , expression ;
 
-(* Initial stack setup - this determines execution order *)
+(* Determines execution order *)
 stack_init = "stack" , ":" , "[" , { identifier } , "]" ;
 
-(* Literals and identifiers *)
 literal = int_literal | string_literal ;
 identifier = letter , { letter | digit | "_" } ;
 int_literal = [ "-" ] , digit , { digit } ;

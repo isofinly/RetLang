@@ -85,7 +85,6 @@ fn collect_uses(expr: &Expression) -> HashSet<Identifier> {
             uses.extend(collect_uses(&unary.operand));
         }
         Expression::Call(call) => {
-            // TODO: Verify this
             for arg in &call.args {
                 uses.extend(collect_uses(arg));
             }
@@ -225,18 +224,10 @@ fn track_local_variables(gadget: &GadgetDef) -> miette::Result<()> {
     Ok(())
 }
 
-// Ensure every gadget ends with ReturnStmt (already in parse, but confirm).
-
-// Ensure offsets/expressions are int-typed (see typing below).
-
-// Address expr must be int-typed
-
-// Condition lhs/rhs must be comparable (both int or both string).
+// Ensure offsets/expressions are int-typed.
+// * Address expr must be int-typed
+// * Condition lhs/rhs must be comparable (both int or both string).
 
 //
 // Type Inference/Checking
-//
-
-//
-// Per-Gadget Analysis
 //

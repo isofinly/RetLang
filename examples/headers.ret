@@ -1,0 +1,8 @@
+external: <stdio.h>
+external: <string.h>
+external: "hashset.h"
+
+gadget main:
+ret
+
+stack: [main]
