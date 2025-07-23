@@ -164,7 +164,7 @@ unary_expr = "!" , expression ;
 
 call = identifier , "(" , [ expression , { "," , expression } ] , ")" ;
 
-(* Determines execution order *)
+(* Determines entrypoint *)
 stack_init = "stack" , ":" , "[" , { identifier } , "]" ;
 
 literal = int_literal | string_literal ;
