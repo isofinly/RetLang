@@ -58,7 +58,7 @@ pub fn compile_c(src_path: &str, out_path: &str, libs: &[String]) -> Result<(), 
 
     let mut cmd = Command::new(&compiler);
 
-    cmd.arg("-Wall").arg("-std=c99");
+    cmd.arg("-Wall").arg("-std=c99").arg("-O3");
 
     let actual_out = if cfg!(windows) && !out_path.ends_with(".exe") {
         format!("{}.exe", out_path)
