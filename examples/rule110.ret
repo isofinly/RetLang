@@ -1,0 +1,164 @@
+// Rule 110 Cellular Automaton
+//
+// This program simulates the Rule 110 one-dimensional cellular automaton.
+//
+// State is stored in memory:
+// - Buffer 1: Addresses 0-59
+// - Buffer 2: Addresses 60-119
+//
+// Global variables are stored at high memory addresses for state management:
+// - 1000: Generation counter
+// - 1001: Base address of the *current* generation's buffer (0 or 60)
+// - 1002: Loop index for iterating over cells
+
+external: <stdio.h>
+
+gadget main:
+    store 30 1000      // generations = 30
+    store 0 1001       // current buffer starts at address 0
+    store 1 59         // Set a single '1' cell at the right edge to start the pattern
+
+    push generation_loop_check
+ret
+
+
+gadget generation_loop_check:
+    // Check if we have more generations to run
+    load gen_count 1000
+    next_gadget = generation_loop_done
+    if gen_count > 0 then next_gadget = generation_loop_body
+    push next_gadget
+ret
+
+gadget generation_loop_body:
+    load gen_count 1000
+    gen_count = gen_count - 1
+    store gen_count 1000
+
+    push generation_loop_check
+    push cell_loop_init
+    push print_loop_init
+ret
+
+gadget generation_loop_done:
+    printf("%s","Rule 110 simulation finished.\n")
+ret
+
+
+// Used to consume a spot on the return stack when a loop finishes, preventing errors.
+gadget do_nothing:
+ret
+
+gadget print_loop_init:
+    store 0 1002            // Reset cell index i = 0 for the print loop
+    push print_newline
+    push print_loop_check
+ret
+
+gadget print_loop_check:
+    load i 1002
+    // When i >= 60, do nothing and fall through to print_newline
+    next_gadget = do_nothing
+    if i < 60 then next_gadget = print_loop_body
+    push next_gadget
+ret
+
+gadget print_loop_body:
+    load i 1002
+    load current_buf_base 1001
+    addr = current_buf_base + i
+    load cell_val addr
+
+    // Schedule the next actions: first the print, then the increment.
+    push print_and_increment // Will run after the character is printed
+
+    // Conditionally schedule which character to print based on the cell's value
+    print_gadget = print_dot
+    if cell_val == 1 then print_gadget = print_hash
+    push print_gadget
+ret
+
+gadget print_dot:
+    printf("%s",".")
+ret
+gadget print_hash:
+    printf("%s","#")
+ret
+
+gadget print_and_increment:
+    // Increment cell index for the next iteration
+    load i 1002
+    i = i + 1
+    store i 1002
+
+    push print_loop_check
+ret
+
+gadget print_newline:
+    printf("%s","\n")
+ret
+
+gadget cell_loop_init:
+    store 0 1002           // Reset cell index i = 0 for the computation loop
+    push swap_buffers      // After the loop, swap the buffer roles for the next generation
+    push cell_loop_check   // Start the cell update loop
+ret
+
+gadget cell_loop_check:
+    load i 1002
+    next_gadget = do_nothing // When i >= 60, do nothing and fall through to swap_buffers
+    if i < 60 then next_gadget = apply_rule_110
+    push next_gadget
+ret
+
+gadget apply_rule_110:
+    load i 1002
+    load src_base 1001
+
+    dest_base = 60
+    if src_base == 60 then dest_base = 0
+
+    left_val = 0
+    right_val = 0
+
+    left_addr = src_base + i
+    if i > 0 then left_addr = left_addr - 1
+    if i > 0 then left_val = [left_addr]
+
+    right_addr = src_base + i
+    if i < 59 then right_addr = right_addr + 1
+    if i < 59 then right_val = [right_addr]
+
+    center_addr = src_base + i
+    load center_val center_addr
+
+    // Combine neighbor states into a 3-bit pattern (LCR)
+    pattern = left_val * 4
+    center_pattern = center_val * 2
+    pattern = pattern + center_pattern
+    pattern = pattern + right_val
+
+    // Apply Rule 110 (binary 01101110)
+    new_state = 0
+    if pattern == 1 then new_state = 1
+    if pattern == 2 then new_state = 1
+    if pattern == 3 then new_state = 1
+    if pattern == 5 then new_state = 1
+    if pattern == 6 then new_state = 1
+
+    dest_addr = dest_base + i
+    store new_state dest_addr
+
+    i = i + 1
+    store i 1002
+    push cell_loop_check
+ret
+
+gadget swap_buffers:
+    load current_buf 1001
+    new_buf = 60
+    if current_buf == 60 then new_buf = 0
+    store new_buf 1001
+ret
+
+stack: [main]

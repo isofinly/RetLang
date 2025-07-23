@@ -1,21 +1,24 @@
 // Factorial calculation using pure ROP
 // All control flow happens through return stack manipulation
 
+external: <stdio.h>
+
 gadget factorial_init:
-    // Initialize: push n, result=1, counter=n
     pop n
     result = 1
     counter = n
     push result
     push counter
+    push factorial_check
 ret
 
 gadget factorial_check:
     // Check if counter <= 1
     peek counter [0]
     peek result [1]
-    if counter <= 1 then stack[2] = factorial_done
-    if counter > 1 then stack[2] = factorial_multiply
+    next = factorial_done
+    if counter > 1 then next = factorial_multiply
+    push next
 ret
 
 gadget factorial_multiply:
@@ -25,25 +28,25 @@ gadget factorial_multiply:
     counter = counter - 1
     push result
     push counter
-    push factorial_check  // Continue loop
+    push factorial_check      // Continue loop
 ret
 
 gadget factorial_done:
     pop counter  // discard counter
     pop result   // result is on top
     push result
-ret factorial_result
+    push factorial_result
+ret
 
 gadget factorial_result:
     pop result
-    // result now contains factorial
+    printf("Factorial: %lld\n", result)
     output = result
 ret
 
 gadget main:
-    push 5  // Calculate factorial of 5
+    push 12
     push factorial_init
 ret
 
-// Execution stack (read bottom to top):
-stack: [main, factorial_init, factorial_check]
+stack: [main]

@@ -1,0 +1,20 @@
+// Transpiled programs have 1024 stack memory slots
+// This program tries to access memory outside the bounds of the stack
+
+external: <stdio.h>
+
+gadget main:
+    printf("Testing memory bounds checking...\n")
+
+    store 42 1023
+    load valid_val 1023
+    printf("Valid access at address 1023: %lld\n", valid_val)
+
+    printf("Attempting to store at address 1024 (should fail)...\n")
+    store 999 1024
+
+    printf("ERROR: This line should not be printed!\n")
+
+ret
+
+stack: [main]

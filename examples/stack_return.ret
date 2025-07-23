@@ -1,5 +1,0 @@
-gadget test:
-    x = 5
-ret stack[x]
-
-stack: [test]

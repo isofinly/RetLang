@@ -1,0 +1,30 @@
+// Calculate value from a stack variable and print it
+
+external: <stdio.h>
+
+gadget main:
+    push 1
+    push 2
+    push 3
+    push 4
+    push 5
+    push 6
+    push test
+ret
+
+gadget test:
+    x = 5
+ret stack[x]
+
+gadget increment:
+    pop x
+    x = x + 1
+    push x
+ret
+
+gadget print:
+    peek to_print [0]
+    printf("%lld\n", to_print)
+ret
+
+stack: [main]

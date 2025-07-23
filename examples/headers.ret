@@ -1,8 +1,12 @@
+// Example program showing how to use C headers
+// Will fail to compile due to missing `hashset.h` header file, but successfully transpiles to C
+
 external: <stdio.h>
 external: <string.h>
-external: "hashset.h"
+// external: "hashset.h"
 
 gadget main:
+    // Do something here
 ret
 
 stack: [main]

@@ -1,0 +1,27 @@
+// Simple conditional tests based on reassigned values
+
+external: <stdio.h>
+
+gadget main:
+    store 10 0
+    store 20 1
+
+    load val1 0
+    load val2 1
+
+    if val1 == 10 then result = 100
+    printf("Equality test result: %lld\n", result)
+
+    if val1 != val2 then result = 200
+    printf("Inequality test result: %lld\n", result)
+
+    if val1 < val2 then result = 300
+    printf("Less than test result: %lld\n", result)
+
+    store 42 2
+    load stored_val 2
+    printf("Stored and loaded value: %lld\n", stored_val)
+
+ret
+
+stack: [main]

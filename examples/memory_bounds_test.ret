@@ -1,0 +1,31 @@
+// Transpiled programs have 1024 stack memory slots
+// This program shows how to use it
+
+external: <stdio.h>
+
+gadget main:
+    store 100 0
+    load val0 0
+    printf("Memory[0] = %lld\n", val0)
+
+    store 200 512
+    load val512 512
+    printf("Memory[512] = %lld\n", val512)
+
+    store 300 1023
+    load val1023 1023
+    printf("Memory[1023] = %lld\n", val1023)
+
+    addr = 1023
+    if addr < 1024 then result = 999
+    printf("Bounds check (addr < 1024): result = %lld\n", result)
+
+    store addr 10
+    load stored_addr 10
+    printf("Stored address value: %lld\n", stored_addr)
+
+    printf("All bounds tests completed successfully!\n")
+
+ret
+
+stack: [main]

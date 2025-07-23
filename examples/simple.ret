@@ -1,8 +1,11 @@
+external: <stdio.h>
+
 gadget main:
-    print("Goodbye!")
+    printf("%s", "Goodbye!")
 ret
 
 gadget aboba:
+    // this gadget is unused
 ret
 
 stack: [main, aboba]
