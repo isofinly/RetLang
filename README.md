@@ -18,6 +18,8 @@ Currently address space size is limited by constant defined at compiled time.
 ### 1. Compile retc
 
 ```bash
+git clone https://github.com/isofinly/RetLang.git
+cd RetLang/backend
 cargo build --release
 ```
 
@@ -91,7 +93,7 @@ $ retc t program.ret .build/custom.c
 then run your compiler
 
 ```bash
-$ tcc -Wall -O3 ./.build/custom.c -o ./.build/main
+$ tcc -Wall -O3 .build/custom.c -o .build/main
 ```
 
 ### 5. Debugging IR
