@@ -1,4 +1,5 @@
 pub mod ast;
+mod constants;
 pub mod core;
-pub mod semantics;
-pub mod transpiler;
+mod semantics;
+mod transpiler;

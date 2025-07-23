@@ -28,21 +28,31 @@ impl<'t> Parser<'t> {
         self.iter.next().map(|t| &t.kind)
     }
     fn expect(&mut self, want: TokenKind) -> Result<()> {
-        match self.next() {
-            Some(k) if *k == want => Ok(()),
-            _ => Err(miette!("expected `{want:?}` next token: {:?}", self.peek())),
+        if let Some(k) = self.peek() {
+            if *k == want {
+                self.next();
+                Ok(())
+            } else {
+                Err(miette!("expected `{want:?}`, got {k:?}"))
+            }
+        } else {
+            Err(miette!("expected `{want:?}`, got None"))
         }
     }
     fn expect_identifier(&mut self) -> Result<String> {
-        match self.next() {
-            Some(TokenKind::Identifier(s)) => Ok(s.clone()),
-            _ => Err(miette!("expected identifier")),
+        if let Some(TokenKind::Identifier(s)) = self.peek() {
+            self.next();
+            Ok(s.clone())
+        } else {
+            Err(miette!("expected identifier, got {:?}", self.peek()))
         }
     }
     fn expect_string(&mut self) -> Result<String> {
-        match self.next() {
-            Some(TokenKind::Str(s)) => Ok(s.clone()),
-            _ => Err(miette!("expected string literal")),
+        if let Some(TokenKind::Str(s)) = self.peek() {
+            self.next();
+            Ok(s.clone())
+        } else {
+            Err(miette!("expected string literal, got {:?}", self.peek()))
         }
     }
 
@@ -429,33 +439,81 @@ impl<'t> Parser<'t> {
                     operand,
                 })))
             }
-            _ => Err(miette!("unexpected token in expression")),
+            _ => Err(miette!(
+                "unexpected token in expression: {:?}",
+                self.peek().unwrap()
+            )),
         }
     }
 }
 
 mod tests {
+    #![allow(unused)]
     use super::*;
-
-    fn make_token(kind: TokenKind, line: usize, column: usize) -> Token {
-        Token { kind, line, column }
-    }
 
     #[test]
     fn test_parse_external_header_1() -> miette::Result<()> {
         let tokens = vec![
-            make_token(TokenKind::External, 2, 1),
-            make_token(TokenKind::Colon, 2, 9),
-            make_token(TokenKind::Lt, 2, 11),
-            make_token(TokenKind::Identifier("aboba".to_string()), 2, 12),
-            make_token(TokenKind::Dot, 2, 17),
-            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
-            make_token(TokenKind::Gt, 2, 19),
-            make_token(TokenKind::Stack, 3, 1),
-            make_token(TokenKind::Colon, 3, 7),
-            make_token(TokenKind::LBracket, 3, 8),
-            make_token(TokenKind::RBracket, 3, 9),
-            make_token(TokenKind::Eof, 3, 10),
+            Token {
+                kind: TokenKind::External,
+                line: 2,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 2,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 2,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba".to_string()),
+                line: 2,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 2,
+                column: 17,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 2,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 2,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::Stack,
+                line: 3,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 3,
+                column: 7,
+            },
+            Token {
+                kind: TokenKind::LBracket,
+                line: 3,
+                column: 8,
+            },
+            Token {
+                kind: TokenKind::RBracket,
+                line: 3,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 3,
+                column: 10,
+            },
         ];
         let ast = parse(&tokens)?;
 
@@ -472,14 +530,46 @@ mod tests {
     #[test]
     fn test_incorrect_external_header() -> miette::Result<()> {
         let tokens = vec![
-            make_token(TokenKind::External, 2, 1),
-            make_token(TokenKind::Colon, 2, 9),
-            make_token(TokenKind::Identifier("aboba.h".to_string()), 2, 11),
-            make_token(TokenKind::Stack, 3, 1),
-            make_token(TokenKind::Colon, 3, 7),
-            make_token(TokenKind::LBracket, 3, 8),
-            make_token(TokenKind::RBracket, 3, 9),
-            make_token(TokenKind::Eof, 3, 10),
+            Token {
+                kind: TokenKind::External,
+                line: 2,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 2,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba.h".to_string()),
+                line: 2,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Stack,
+                line: 3,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 3,
+                column: 7,
+            },
+            Token {
+                kind: TokenKind::LBracket,
+                line: 3,
+                column: 8,
+            },
+            Token {
+                kind: TokenKind::RBracket,
+                line: 3,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 3,
+                column: 10,
+            },
         ];
         let res = parse(&tokens);
 
@@ -490,25 +580,101 @@ mod tests {
     #[test]
     fn test_parse_multiple_external_headers() -> miette::Result<()> {
         let tokens = vec![
-            make_token(TokenKind::External, 2, 1),
-            make_token(TokenKind::Colon, 2, 9),
-            make_token(TokenKind::Lt, 2, 11),
-            make_token(TokenKind::Identifier("aboba".to_string()), 2, 12),
-            make_token(TokenKind::Dot, 2, 17),
-            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
-            make_token(TokenKind::Gt, 2, 19),
-            make_token(TokenKind::External, 3, 1),
-            make_token(TokenKind::Colon, 3, 9),
-            make_token(TokenKind::Lt, 3, 11),
-            make_token(TokenKind::Identifier("aboba2".to_string()), 3, 12),
-            make_token(TokenKind::Dot, 3, 18),
-            make_token(TokenKind::Identifier("h".to_string()), 3, 19),
-            make_token(TokenKind::Gt, 3, 20),
-            make_token(TokenKind::Stack, 4, 1),
-            make_token(TokenKind::Colon, 4, 7),
-            make_token(TokenKind::LBracket, 4, 8),
-            make_token(TokenKind::RBracket, 4, 9),
-            make_token(TokenKind::Eof, 4, 10),
+            Token {
+                kind: TokenKind::External,
+                line: 2,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 2,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 2,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba".to_string()),
+                line: 2,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 2,
+                column: 17,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 2,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 2,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::External,
+                line: 3,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 3,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 3,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("aboba2".to_string()),
+                line: 3,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 3,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 3,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 3,
+                column: 20,
+            },
+            Token {
+                kind: TokenKind::Stack,
+                line: 4,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 4,
+                column: 7,
+            },
+            Token {
+                kind: TokenKind::LBracket,
+                line: 4,
+                column: 8,
+            },
+            Token {
+                kind: TokenKind::RBracket,
+                line: 4,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 4,
+                column: 10,
+            },
         ];
         let ast = parse(&tokens)?;
 
@@ -528,23 +694,91 @@ mod tests {
     #[test]
     fn test_parse_external_with_gadget() -> miette::Result<()> {
         let tokens = vec![
-            make_token(TokenKind::External, 2, 1),
-            make_token(TokenKind::Colon, 2, 9),
-            make_token(TokenKind::Lt, 2, 11),
-            make_token(TokenKind::Identifier("stdio".to_string()), 2, 12),
-            make_token(TokenKind::Dot, 2, 17),
-            make_token(TokenKind::Identifier("h".to_string()), 2, 18),
-            make_token(TokenKind::Gt, 2, 19),
-            make_token(TokenKind::Gadget, 4, 1),
-            make_token(TokenKind::Identifier("main".to_string()), 4, 8),
-            make_token(TokenKind::Colon, 4, 12),
-            make_token(TokenKind::Ret, 5, 5),
-            make_token(TokenKind::Stack, 7, 1),
-            make_token(TokenKind::Colon, 7, 7),
-            make_token(TokenKind::LBracket, 7, 8),
-            make_token(TokenKind::Identifier("main".to_string()), 7, 9),
-            make_token(TokenKind::RBracket, 7, 13),
-            make_token(TokenKind::Eof, 7, 14),
+            Token {
+                kind: TokenKind::External,
+                line: 2,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 2,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::Lt,
+                line: 2,
+                column: 11,
+            },
+            Token {
+                kind: TokenKind::Identifier("stdio".to_string()),
+                line: 2,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Dot,
+                line: 2,
+                column: 17,
+            },
+            Token {
+                kind: TokenKind::Identifier("h".to_string()),
+                line: 2,
+                column: 18,
+            },
+            Token {
+                kind: TokenKind::Gt,
+                line: 2,
+                column: 19,
+            },
+            Token {
+                kind: TokenKind::Gadget,
+                line: 4,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Identifier("main".to_string()),
+                line: 4,
+                column: 8,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 4,
+                column: 12,
+            },
+            Token {
+                kind: TokenKind::Ret,
+                line: 5,
+                column: 5,
+            },
+            Token {
+                kind: TokenKind::Stack,
+                line: 7,
+                column: 1,
+            },
+            Token {
+                kind: TokenKind::Colon,
+                line: 7,
+                column: 7,
+            },
+            Token {
+                kind: TokenKind::LBracket,
+                line: 7,
+                column: 8,
+            },
+            Token {
+                kind: TokenKind::Identifier("main".to_string()),
+                line: 7,
+                column: 9,
+            },
+            Token {
+                kind: TokenKind::RBracket,
+                line: 7,
+                column: 13,
+            },
+            Token {
+                kind: TokenKind::Eof,
+                line: 7,
+                column: 14,
+            },
         ];
         let ast = parse(&tokens)?;
 

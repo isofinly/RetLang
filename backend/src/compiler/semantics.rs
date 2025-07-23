@@ -4,11 +4,11 @@ use crate::compiler::ast::{
     Condition, Expression, GadgetDef, Identifier, Instruction, MemoryOp, Program, StackOp,
 };
 
-pub fn check_semantics(ast: &Program) -> miette::Result<()> {
-    check_stack_init(&ast)?;
-    check_calls(&ast)?;
+pub(crate) fn check_semantics(ast: &Program) -> miette::Result<()> {
+    check_stack_init(ast)?;
+    check_calls(ast)?;
     for gadget in &ast.gadgets {
-        track_local_variables(&gadget)?;
+        track_local_variables(gadget)?;
     }
 
     Ok(())
@@ -35,25 +35,19 @@ fn check_calls(ast: &Program) -> miette::Result<()> {
         .collect::<Vec<_>>();
     for gadget in &ast.gadgets {
         for instruction in gadget.body.instructions.as_slice() {
-            match instruction {
-                Instruction::Call(call) => {
-                    if !gadget_defs.contains(&&call.callee) {
-                        eprintln!("WARN: Found call to undefined identifier {:?}", call.callee)
-                        // TODO: Think about it
-                        // return Err(miette::miette!("Undefined gadget name: {}", call.callee));
-                    }
+            if let Instruction::Call(call) = instruction {
+                if !gadget_defs.contains(&&call.callee) {
+                    eprintln!("WARN: Found call to undefined identifier {:?}", call.callee)
+                    // TODO: Think about it
+                    // return Err(miette::miette!("Undefined gadget name: {}", call.callee));
                 }
-                _ => {}
             }
-            match &gadget.body.ret.value {
-                Some(Expression::Call(call)) => {
-                    if !gadget_defs.contains(&&call.callee) {
-                        eprintln!("WARN: Found call to undefined identifier {:?}", call.callee);
-                        // TODO: Think about it
-                        // return Err(miette::miette!("Undefined gadget name: {}", call.callee));
-                    }
+            if let Some(Expression::Call(call)) = &gadget.body.ret.value {
+                if !gadget_defs.contains(&&call.callee) {
+                    eprintln!("WARN: Found call to undefined identifier {:?}", call.callee);
+                    // TODO: Think about it
+                    // return Err(miette::miette!("Undefined gadget name: {}", call.callee));
                 }
-                _ => {}
             }
         }
     }
@@ -119,10 +113,8 @@ fn collect_defs(inst: &Instruction) -> HashSet<Identifier> {
         Instruction::Arithmetic(a) => {
             defs.insert(a.dest.clone());
         }
-        Instruction::MemoryOp(mem) => {
-            if let MemoryOp::Load { target, .. } = mem {
-                defs.insert(target.clone());
-            }
+        Instruction::MemoryOp(MemoryOp::Load { target, .. }) => {
+            defs.insert(target.clone());
         }
         Instruction::ConditionalMod(c) => {
             defs.insert(c.target.clone());
@@ -132,7 +124,10 @@ fn collect_defs(inst: &Instruction) -> HashSet<Identifier> {
     defs
 }
 
-fn track_local_variables(gadget: &GadgetDef) -> miette::Result<()> {
+/// Returns correctly defined local variables per given gadget
+///
+/// TODO: Maybe take whole `Program` reference instead and output unique identifiers
+pub(crate) fn track_local_variables(gadget: &GadgetDef) -> miette::Result<HashSet<Identifier>> {
     // which identifiers can be locals
     let candidate_locals: HashSet<Identifier> = gadget
         .body
@@ -213,7 +208,7 @@ fn track_local_variables(gadget: &GadgetDef) -> miette::Result<()> {
         ));
     }
 
-    Ok(())
+    Ok(defined)
 }
 
 // Ensure offsets/expressions are int-typed.

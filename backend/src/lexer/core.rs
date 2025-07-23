@@ -172,6 +172,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
 }
 
 mod tests {
+    #![allow(unused)]
     use super::*;
 
     #[test]

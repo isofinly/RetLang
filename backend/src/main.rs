@@ -1,6 +1,5 @@
 mod compiler;
 mod lexer;
-mod linker;
 mod parser;
 mod utils;
 
@@ -22,20 +21,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    #[command(visible_aliases = &["lx", "lexit"])]
+    #[command(visible_aliases = &["lx"])]
     Lex { input: PathBuf },
-    #[command(visible_aliases = &[ "c", "cmp"])]
+    #[command(visible_aliases = &[ "c"])]
     Compile {
         input: PathBuf,
         #[arg(short, long, default_value = "./.build/out.o")]
         output: PathBuf,
+        #[arg(short, long, default_value = "")]
+        libraries: Vec<String>,
     },
-    #[command(visible_aliases = &["ld", "lnk"])]
-    Link {
-        objects: Vec<PathBuf>,
-        #[arg(short, long, default_value = "./.build/a.out")]
-        output: PathBuf,
-    },
+    #[command(visible_aliases = &["p"])]
+    Parse { input: PathBuf },
+    #[command(visible_aliases = &["t"])]
+    Transpile { input: PathBuf, output: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -59,22 +58,54 @@ fn main() -> Result<()> {
             });
         }
 
-        Cmd::Compile { input, output } => {
+        Cmd::Parse { input } => {
             let src = std::fs::read_to_string(&input).into_diagnostic()?;
             let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
             let ast = parser::core::parse(tokens.as_slice())?;
             println!("{:?}", ast);
-            let obj_bin = compiler::core::compile(ast)?;
+        }
+
+        Cmd::Transpile { input, output } => {
+            let src = std::fs::read_to_string(&input).into_diagnostic()?;
+            let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
+            let ast = parser::core::parse(tokens.as_slice())?;
+            let js_code = compiler::core::compile(ast)?;
             if !output.exists() {
                 std::fs::create_dir_all(output.parent().unwrap()).into_diagnostic()?;
             }
-            std::fs::write(&output, obj_bin).into_diagnostic()?;
-            println!("wrote {}", output.display());
+            std::fs::write(&output, js_code).into_diagnostic()?;
         }
 
-        Cmd::Link { objects, output } => {
-            linker::core::link(&objects, &output)?;
-            println!("linked {}", output.display());
+        Cmd::Compile {
+            input,
+            output,
+            libraries,
+        } => {
+            let src = std::fs::read_to_string(&input).into_diagnostic()?;
+            let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
+            let ast = parser::core::parse(tokens.as_slice())?;
+            let obj_bin = compiler::core::compile(ast)?;
+            if let Some(parent) = output.parent() {
+                if !parent.exists() {
+                    std::fs::create_dir_all(parent).into_diagnostic()?;
+                }
+            }
+            let mut c_source_path = output.clone();
+            c_source_path.set_extension("c");
+            std::fs::write(&c_source_path, obj_bin).into_diagnostic()?;
+            match utils::gcc::compile_c(
+                c_source_path.to_str().unwrap(),
+                output.to_str().unwrap(),
+                &libraries.as_slice(),
+            ) {
+                Ok(_) => {
+                    println!("Compilation successful");
+                }
+                Err(e) => {
+                    eprintln!("Compilation failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 

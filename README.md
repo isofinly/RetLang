@@ -6,6 +6,8 @@ It supports linking with external C libraries by either specifying the library n
 
 Due to simplistic nature of the language, support for imports and external gadgets is not planned.
 
+Currently address space size is limited by constant defined at compiled time.
+
 ## Targets
 
 - Any target that is supported by C
@@ -75,6 +77,8 @@ stack_ref = "stack" , "[" , expression , "]" ;
 binary_expr = expression , ( "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" ) , expression ;
 
 unary_expr = "!" , expression ;
+
+call = identifier , "(" , [ expression , { "," , expression } ] , ")" ;
 
 (* Determines execution order *)
 stack_init = "stack" , ":" , "[" , { identifier } , "]" ;
