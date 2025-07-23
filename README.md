@@ -11,12 +11,96 @@ Currently address space size is limited by constant defined at compiled time.
 ## Targets
 
 - Any target that is supported by C
-- WASM
+- WASM (needs testing)
+
+## Usage
+
+### 1. Compile retc
+
+```bash
+cargo build --release
+```
+
+### 2. Place retc to your $PATH and then you can use it to compile your ROP programs.
+
+```bash
+$ retc -h
+RET-lang toolchain
+
+Usage: retc <COMMAND>
+
+Commands:
+  lex        [aliases: lx]
+  compile    [aliases: c]
+  parse      [aliases: p]
+  transpile  [aliases: t]
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### 3. Create simple program
+
+```ret
+external: <stdio.h>
+
+gadget main:
+    printf("%s", "Goodbye!")
+ret
+
+stack: [main]
+```
+
+### 4. Compilation
+
+#### 4.1 Direct compilation
+
+```bash
+$ retc c program.ret
+```
+
+or specify output file
+
+```bash
+$ retc c program.ret -o program
+```
+
+or link with library
+
+```bash
+$ retc c program.ret -l z
+```
+
+Inspecting the binary:
+
+```bash
+$ otool -L .build/main
+.build/main:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+
+```
+
+#### 4.2 Compilation with external C compiler
+
+```bash
+$ retc t program.ret .build/custom.c
+```
+
+then run your compiler
+
+```bash
+$ tcc -Wall -O3 ./.build/custom.c -o ./.build/main
+```
+
+### 5. Debugging IR
+
+You can view lexer, parser outputs by using the `lex` or `parse` commands.
 
 ## Grammar
 
 ```ebnf
-
 header_name = identifier , { "." , identifier } ;
 
 external = "external" , ":" ,
