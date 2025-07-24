@@ -9,12 +9,32 @@ use crate::compiler::{
 };
 
 pub struct CodeBuilder<'a> {
-    ast: &'a Program,
+    ast: &'a Program<'a>,
     need_defines: bool,
     need_typedefs: bool,
     need_vars: bool,
     need_includes: bool,
     need_main: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum TempVar {
+    PeekOff,
+    PeekOffVal,
+    SwapLeft,
+    SwapLeftVal,
+    SwapRight,
+    SwapRightVal,
+    SwapTemp,
+    BinRes,
+    AddrVal,
+    CallRet,
+    Off,
+    OffVal,
+    RetVal,
+    MemOff,
+    MemOffVal,
+    UnaryRes,
 }
 
 impl<'a> CodeBuilder<'a> {
@@ -68,7 +88,7 @@ impl<'a> CodeBuilder<'a> {
         self
     }
 
-    fn find_referenced_gadgets(&self) -> std::collections::HashSet<String> {
+    fn find_referenced_gadgets(&self) -> std::collections::HashSet<&'a str> {
         let mut referenced = std::collections::HashSet::new();
 
         for gadget in &self.ast.gadgets {
@@ -85,8 +105,8 @@ impl<'a> CodeBuilder<'a> {
 
     fn collect_gadget_refs_from_instr(
         &self,
-        instr: &Instruction,
-        refs: &mut std::collections::HashSet<String>,
+        instr: &'a Instruction,
+        refs: &mut std::collections::HashSet<&'a str>,
     ) {
         match instr {
             Instruction::StackOp(StackOp::Push(expr)) => {
@@ -131,13 +151,13 @@ impl<'a> CodeBuilder<'a> {
 
     fn collect_gadget_refs_from_expr(
         &self,
-        expr: &Expression,
-        refs: &mut std::collections::HashSet<String>,
+        expr: &'a Expression,
+        refs: &mut std::collections::HashSet<&'a str>,
     ) {
         match expr {
             Expression::Identifier(id) => {
                 if self.ast.gadgets.iter().any(|g| &g.name == id) {
-                    refs.insert(id.clone());
+                    refs.insert(id);
                 }
             }
             Expression::Binary(bin) => {
@@ -162,7 +182,7 @@ impl<'a> CodeBuilder<'a> {
         }
     }
 
-    fn analyze_used_variables(&self) -> std::collections::HashSet<&'static str> {
+    fn analyze_used_variables(&self) -> std::collections::HashSet<TempVar> {
         let mut used = std::collections::HashSet::new();
 
         for gadget in &self.ast.gadgets {
@@ -180,25 +200,25 @@ impl<'a> CodeBuilder<'a> {
     fn collect_used_vars_from_instr(
         &self,
         instr: &Instruction,
-        used: &mut std::collections::HashSet<&'static str>,
+        used: &mut std::collections::HashSet<TempVar>,
     ) {
         match instr {
             Instruction::StackOp(StackOp::Peek { .. }) => {
-                used.insert("peek_off");
-                used.insert("peek_off_val");
+                used.insert(TempVar::PeekOff);
+                used.insert(TempVar::PeekOffVal);
             }
             Instruction::StackOp(StackOp::Swap { .. }) => {
-                used.insert("swap_left");
-                used.insert("swap_left_val");
-                used.insert("swap_right");
-                used.insert("swap_right_val");
-                used.insert("swap_temp");
+                used.insert(TempVar::SwapLeft);
+                used.insert(TempVar::SwapLeftVal);
+                used.insert(TempVar::SwapRight);
+                used.insert(TempVar::SwapRightVal);
+                used.insert(TempVar::SwapTemp);
             }
             Instruction::Arithmetic(_) => {
-                used.insert("bin_res");
+                used.insert(TempVar::BinRes);
             }
             Instruction::MemoryOp(_) => {
-                used.insert("addr_val");
+                used.insert(TempVar::AddrVal);
             }
             Instruction::ConditionalMod(cond_mod) => {
                 self.collect_used_vars_from_expr(&cond_mod.condition.lhs, used);
@@ -210,7 +230,7 @@ impl<'a> CodeBuilder<'a> {
             }
 
             Instruction::Call(_) => {
-                used.insert("call_ret");
+                used.insert(TempVar::CallRet);
             }
             _ => {}
         }
@@ -219,27 +239,27 @@ impl<'a> CodeBuilder<'a> {
     fn collect_used_vars_from_expr(
         &self,
         expr: &Expression,
-        used: &mut std::collections::HashSet<&'static str>,
+        used: &mut std::collections::HashSet<TempVar>,
     ) {
         match expr {
             Expression::StackRef(_) => {
-                used.insert("off");
-                used.insert("off_val");
-                used.insert("ret_val");
+                used.insert(TempVar::Off);
+                used.insert(TempVar::OffVal);
+                used.insert(TempVar::RetVal);
             }
             Expression::MemoryRef(_) => {
-                used.insert("mem_off");
-                used.insert("mem_off_val");
+                used.insert(TempVar::MemOff);
+                used.insert(TempVar::MemOffVal);
             }
             Expression::Binary(bin) => {
                 self.collect_used_vars_from_expr(&bin.lhs, used);
                 self.collect_used_vars_from_expr(&bin.rhs, used);
             }
             Expression::Unary(_) => {
-                used.insert("unary_res");
+                used.insert(TempVar::UnaryRes);
             }
             Expression::Call(_) => {
-                used.insert("call_ret");
+                used.insert(TempVar::CallRet);
             }
             _ => {}
         }
@@ -287,40 +307,40 @@ impl<'a> CodeBuilder<'a> {
             code.push_str("int capacity = INITIAL_CAPACITY;\n\n");
             code.push_str("// Variable declarations for C99 compliance\n");
             let used_vars = self.analyze_used_variables();
-            if used_vars.contains("off") {
+            if used_vars.contains(&TempVar::Off) {
                 code.push_str("Value off;\n");
                 code.push_str("long long off_val;\n");
             }
-            if used_vars.contains("mem_off") {
+            if used_vars.contains(&TempVar::MemOff) {
                 code.push_str("Value mem_off;\n");
                 code.push_str("long long mem_off_val;\n");
             }
-            if used_vars.contains("peek_off") {
+            if used_vars.contains(&TempVar::PeekOff) {
                 code.push_str("Value peek_off;\n");
                 code.push_str("long long peek_off_val;\n");
             }
-            if used_vars.contains("swap_left") {
+            if used_vars.contains(&TempVar::SwapLeft) {
                 code.push_str("Value swap_left;\n");
                 code.push_str("long long swap_left_val;\n");
                 code.push_str("Value swap_right;\n");
                 code.push_str("long long swap_right_val;\n");
                 code.push_str("Value swap_temp;\n");
             }
-            if used_vars.contains("ret_val") {
+            if used_vars.contains(&TempVar::RetVal) {
                 code.push_str("Value ret_val;\n");
             }
             code.push_str("Value next;\n");
-            if used_vars.contains("bin_res") {
+            if used_vars.contains(&TempVar::BinRes) {
                 code.push_str("Value bin_res;\n");
             }
-            if used_vars.contains("addr_val") {
+            if used_vars.contains(&TempVar::AddrVal) {
                 code.push_str("Value mem_addr;\n");
                 code.push_str("long long addr_val;\n");
             }
-            if used_vars.contains("unary_res") {
+            if used_vars.contains(&TempVar::UnaryRes) {
                 code.push_str("Value unary_res;\n");
             }
-            if used_vars.contains("call_ret") {
+            if used_vars.contains(&TempVar::CallRet) {
                 code.push_str("Value call_ret;\n");
             }
             let num_gadgets = self.ast.gadgets.len();
@@ -328,14 +348,14 @@ impl<'a> CodeBuilder<'a> {
                 let var_name = if i == 1 {
                     "ret_top".to_string()
                 } else {
-                    format!("ret_top{}", i)
+                    format!("ret_top{i}")
                 };
-                code.push_str(&format!("Value {};\n", var_name));
+                code.push_str(&format!("Value {var_name};\n"));
             }
             code.push('\n');
 
             // Add memory array if memory operations are used
-            if used_vars.contains("addr_val") || used_vars.contains("mem_off") {
+            if used_vars.contains(&TempVar::AddrVal) || used_vars.contains(&TempVar::MemOff) {
                 code.push_str("// Memory array for load/store operations\n");
                 code.push_str("Value memory[MEMORY_SIZE];\n");
                 code.push_str("// Initialize memory to zero\n");
@@ -351,7 +371,7 @@ impl<'a> CodeBuilder<'a> {
                 code.push_str("stack = realloc(stack, capacity * sizeof(Value));\n");
                 code.push_str("if (!stack) return ERR_ALLOC;\n");
                 code.push_str("}\n");
-                code.push_str(&format!("stack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{}_start}}}};\n", id));
+                code.push_str(&format!("stack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{id}_start}}}};\n"));
             }
             code.push('\n');
             code.push_str("void *pc = &&start;\n");
@@ -413,7 +433,7 @@ impl<'a> CodeBuilder<'a> {
                 let suff = if *count == 1 {
                     proposed
                 } else {
-                    format!("{}_{}", proposed, *count)
+                    format!("{proposed}_{count}")
                 };
                 suffixes.push(suff);
             }
@@ -424,27 +444,27 @@ impl<'a> CodeBuilder<'a> {
             let ret_suff = if *ret_count == 1 {
                 proposed_ret
             } else {
-                format!("{}_{}", proposed_ret, *ret_count)
+                format!("{proposed_ret}_{ret_count}")
             };
             suffixes.push(ret_suff);
 
             for i in 0..instructions.len() {
                 let label_suff = &suffixes[i];
-                code.push_str(&format!("g_{}_{}:\n", gadget_name, label_suff));
+                code.push_str(&format!("g_{gadget_name}_{label_suff}:\n"));
                 code.push_str(&format!(
                     "// {}\n",
                     self.comment_for_instr(&instructions[i])
                 ));
                 code.push_str(&self.generate_instr_code(&instructions[i]));
-                code.push_str(&format!("pc = &&g_{}_{};\n", gadget_name, suffixes[i + 1]));
+                code.push_str(&format!("pc = &&g_{gadget_name}_{};\n", suffixes[i + 1]));
                 code.push_str("goto *pc;\n\n");
             }
 
             let ret_label_suff = &suffixes[instructions.len()];
-            code.push_str(&format!("g_{}_{}:\n", gadget_name, ret_label_suff));
+            code.push_str(&format!("g_{gadget_name}_{ret_label_suff}:\n"));
             code.push_str(&self.generate_ret_code(&gadget.body.ret, ret_top_count));
         } else {
-            code.push_str(&format!("g_{}_start:\n", gadget_name));
+            code.push_str(&format!("g_{gadget_name}_start:\n"));
             code.push_str(&self.generate_ret_code(&gadget.body.ret, ret_top_count));
         }
 
@@ -458,8 +478,8 @@ impl<'a> CodeBuilder<'a> {
             Instruction::Assignment(_) => "assign".to_string(),
             Instruction::Arithmetic(_) => "arith".to_string(),
             Instruction::StackOp(StackOp::Push(expr)) => match expr {
-                Expression::Literal(Literal::Int(i)) => format!("push{}", i),
-                Expression::Identifier(id) if self.is_gadget(id) => format!("push_{}", id),
+                Expression::Literal(Literal::Int(i)) => format!("push{i}"),
+                Expression::Identifier(id) if self.is_gadget(id) => format!("push_{id}"),
                 _ => "push".to_string(),
             },
             Instruction::StackOp(StackOp::Pop(_)) => "pop".to_string(),
@@ -476,18 +496,18 @@ impl<'a> CodeBuilder<'a> {
         match instr {
             Instruction::Assignment(ass) => format!("{} = {:?}", ass.target, ass.value),
             Instruction::StackOp(op) => match op {
-                StackOp::Push(expr) => format!("push {:?}", expr),
-                StackOp::Pop(id) => format!("pop {}", id),
-                StackOp::Peek { target, offset } => format!("peek {} [{:?}]", target, offset),
-                StackOp::Swap { left, right } => format!("swap {:?} {:?}", left, right),
+                StackOp::Push(expr) => format!("push {expr:?}"),
+                StackOp::Pop(id) => format!("pop {id}"),
+                StackOp::Peek { target, offset } => format!("peek {target} [{offset:?}]"),
+                StackOp::Swap { left, right } => format!("swap {left:?} {right:?}"),
             },
             Instruction::Arithmetic(arith) => format!(
                 "{} {:?}= {:?} {:?} {:?}",
                 arith.dest, arith.op, arith.lhs, arith.rhs_op, arith.rhs
             ),
             Instruction::MemoryOp(mem) => match mem {
-                MemoryOp::Store { value, address } => format!("store {:?} {:?}", value, address),
-                MemoryOp::Load { target, address } => format!("load {} {:?}", target, address),
+                MemoryOp::Store { value, address } => format!("store {value:?} {address:?}"),
+                MemoryOp::Load { target, address } => format!("load {target} {address:?}"),
             },
             Instruction::ConditionalMod(cond) => format!(
                 "if {:?} {:?} {:?} then {} = {:?}",
@@ -506,31 +526,30 @@ impl<'a> CodeBuilder<'a> {
                 c.push_str("stack = realloc(stack, capacity * sizeof(Value));\n");
                 c.push_str("if (!stack) goto end_with_error_alloc;\n");
                 c.push_str("}\n");
-                c.push_str(&format!("stack[sp++] = {};\n", val));
+                c.push_str(&format!("stack[sp++] = {val};\n"));
                 c
             }
-            Instruction::StackOp(StackOp::Pop(target)) => format!(
-                "if (sp <= 0) return ERR_UNDERFLOW;\nv_{} = stack[--sp];\n",
-                target
-            ),
+            Instruction::StackOp(StackOp::Pop(target)) => {
+                format!("if (sp <= 0) return ERR_UNDERFLOW;\nv_{target} = stack[--sp];\n")
+            }
             Instruction::StackOp(StackOp::Peek { target, offset }) => {
                 let (mut c, val) = self.generate_expr(offset);
-                c.push_str(&format!("peek_off = {};\n", val));
+                c.push_str(&format!("peek_off = {val};\n"));
                 c.push_str("if (peek_off.type != TYPE_INT) return ERR_TYPE;\n");
                 c.push_str("peek_off_val = peek_off.u.int_val;\n");
                 c.push_str("if (peek_off_val < 0 || peek_off_val >= sp) return ERR_BOUNDS;\n");
-                c.push_str(&format!("v_{} = stack[sp - 1 - peek_off_val];\n", target));
+                c.push_str(&format!("v_{target} = stack[sp - 1 - peek_off_val];\n"));
                 c
             }
             Instruction::StackOp(StackOp::Swap { left, right }) => {
                 let (mut c, left_val) = self.generate_expr(left);
                 let (right_code, right_val) = self.generate_expr(right);
                 c.push_str(&right_code);
-                c.push_str(&format!("swap_left = {};\n", left_val));
+                c.push_str(&format!("swap_left = {left_val};\n"));
                 c.push_str("if (swap_left.type != TYPE_INT) return ERR_TYPE;\n");
                 c.push_str("swap_left_val = swap_left.u.int_val;\n");
                 c.push_str("if (swap_left_val < 0 || swap_left_val >= sp) return ERR_BOUNDS;\n");
-                c.push_str(&format!("swap_right = {};\n", right_val));
+                c.push_str(&format!("swap_right = {right_val};\n"));
                 c.push_str("if (swap_right.type != TYPE_INT) return ERR_TYPE;\n");
                 c.push_str("swap_right_val = swap_right.u.int_val;\n");
                 c.push_str("if (swap_right_val < 0 || swap_right_val >= sp) return ERR_BOUNDS;\n");
@@ -552,13 +571,12 @@ impl<'a> CodeBuilder<'a> {
                 let (c1, v1) = self.generate_expr(&arith.lhs);
                 let (c2, v2) = self.generate_expr(&arith.rhs);
                 let mut c = c1 + &c2;
-                c.push_str(&format!("if ({}.type != TYPE_INT) return ERR_TYPE;\n", v1));
-                c.push_str(&format!("if ({}.type != TYPE_INT) return ERR_TYPE;\n", v2));
+                c.push_str(&format!("if ({v1}.type != TYPE_INT) return ERR_TYPE;\n"));
+                c.push_str(&format!("if ({v2}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let inner_op_str = self.get_op_str(&arith.rhs_op);
-                let temp_val = format!("{}.u.int_val {} {}.u.int_val", v1, inner_op_str, v2);
+                let temp_val = format!("{v1}.u.int_val {inner_op_str} {v2}.u.int_val");
                 c.push_str(&format!(
-                    "bin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {}}}}};\n",
-                    temp_val
+                    "bin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {temp_val}}}}};\n",
                 ));
                 c.push_str(&format!(
                     "if (v_{}.type != TYPE_INT) return ERR_TYPE;\n",
@@ -576,20 +594,20 @@ impl<'a> CodeBuilder<'a> {
                     let (mut c, val_code) = self.generate_expr(value);
                     let (addr_code, addr_val) = self.generate_expr(address);
                     c.push_str(&addr_code);
-                    c.push_str(&format!("mem_addr = {};\n", addr_val));
+                    c.push_str(&format!("mem_addr = {addr_val};\n"));
                     c.push_str("if (mem_addr.type != TYPE_INT) return ERR_TYPE;\n");
                     c.push_str("addr_val = mem_addr.u.int_val;\n");
                     c.push_str("if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\n");
-                    c.push_str(&format!("memory[addr_val] = {};\n", val_code));
+                    c.push_str(&format!("memory[addr_val] = {val_code};\n"));
                     c
                 }
                 MemoryOp::Load { target, address } => {
                     let (mut c, addr_val) = self.generate_expr(address);
-                    c.push_str(&format!("mem_addr = {};\n", addr_val));
+                    c.push_str(&format!("mem_addr = {addr_val};\n"));
                     c.push_str("if (mem_addr.type != TYPE_INT) return ERR_TYPE;\n");
                     c.push_str("addr_val = mem_addr.u.int_val;\n");
                     c.push_str("if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\n");
-                    c.push_str(&format!("v_{} = memory[addr_val];\n", target));
+                    c.push_str(&format!("v_{target} = memory[addr_val];\n"));
                     c
                 }
             },
@@ -601,18 +619,15 @@ impl<'a> CodeBuilder<'a> {
                 c.push_str(&val_code);
 
                 c.push_str(&format!(
-                    "if ({}.type != TYPE_INT) return ERR_TYPE;\n",
-                    lhs_val
+                    "if ({lhs_val}.type != TYPE_INT) return ERR_TYPE;\n"
                 ));
                 c.push_str(&format!(
-                    "if ({}.type != TYPE_INT) return ERR_TYPE;\n",
-                    rhs_val
+                    "if ({rhs_val}.type != TYPE_INT) return ERR_TYPE;\n"
                 ));
 
                 let comp_op = self.get_comp_op_str(&cond_mod.condition.op);
                 c.push_str(&format!(
-                    "if ({}.u.int_val {} {}.u.int_val) {{\n",
-                    lhs_val, comp_op, rhs_val
+                    "if ({lhs_val}.u.int_val {comp_op} {rhs_val}.u.int_val) {{\n"
                 ));
                 c.push_str(&format!("v_{} = {};\n", cond_mod.target, val_expr));
                 c.push_str("}\n");
@@ -652,7 +667,7 @@ impl<'a> CodeBuilder<'a> {
         if let Some(expr) = &ret.value {
             let (setup_code, val) = self.generate_expr(expr);
             c.push_str(&setup_code);
-            c.push_str(&format!("ret_val = {};\n", val));
+            c.push_str(&format!("ret_val = {val};\n"));
             c.push_str("// Push the value\n");
             c.push_str("if (sp >= capacity) {\n");
             c.push_str("capacity *= 2;\n");
@@ -666,15 +681,14 @@ impl<'a> CodeBuilder<'a> {
         let ret_top_name = if *ret_top_count == 1 {
             "ret_top".to_string()
         } else {
-            format!("ret_top{}", ret_top_count)
+            format!("ret_top{ret_top_count}")
         };
-        c.push_str(&format!("{} = stack[sp - 1];\n", ret_top_name));
+        c.push_str(&format!("{ret_top_name} = stack[sp - 1];\n"));
         c.push_str(&format!(
-            "if ({}.type != TYPE_LABEL) goto end;\n",
-            ret_top_name
+            "if ({ret_top_name}.type != TYPE_LABEL) goto end;\n"
         ));
         c.push_str("sp--;  // pop\n");
-        c.push_str(&format!("pc = {}.u.label_val;\n", ret_top_name));
+        c.push_str(&format!("pc = {ret_top_name}.u.label_val;\n"));
         c.push_str("goto *pc;\n");
         c
     }
@@ -689,8 +703,8 @@ impl<'a> CodeBuilder<'a> {
         }
         c.push_str("#pragma GCC diagnostic push\n");
         c.push_str("#pragma GCC diagnostic ignored \"-Wint-conversion\"\n");
-        let mut unpacks: Vec<String> = Vec::new();
-        self.gen_call_branch(&mut c, 0, &mut unpacks, &args_vals, &call.callee);
+        let mut unpacks = Vec::new();
+        self.gen_call_branch(&mut c, 0, &mut unpacks, &args_vals, call.callee);
         c.push_str("#pragma GCC diagnostic pop\n");
         let ret_val = if is_expr {
             Some("call_ret".to_string())
@@ -706,7 +720,7 @@ impl<'a> CodeBuilder<'a> {
         arg_index: usize,
         unpacks: &mut Vec<String>,
         args_vals: &Vec<String>,
-        callee: &String,
+        callee: &'a str,
     ) {
         if arg_index == args_vals.len() {
             c.push_str("call_ret.type = TYPE_INT;\n");
@@ -725,8 +739,8 @@ impl<'a> CodeBuilder<'a> {
         ];
         for (i, (ty, field)) in types.iter().enumerate() {
             let prefix = if i == 0 { "" } else { "else " };
-            c.push_str(&format!("{}if ({}.type == TYPE_{}) {{\n", prefix, val, ty));
-            unpacks.push(format!("{}.u.{}", val, field));
+            c.push_str(&format!("{prefix}if ({val}.type == TYPE_{ty}) {{\n"));
+            unpacks.push(format!("{val}.u.{field}"));
             self.gen_call_branch(c, arg_index + 1, unpacks, args_vals, callee);
             unpacks.pop();
             c.push_str("}\n");
@@ -742,7 +756,7 @@ impl<'a> CodeBuilder<'a> {
                 String::new(),
                 match lit {
                     Literal::Int(i) => {
-                        format!("(Value){{.type = TYPE_INT, .u = {{.int_val = {}LL}}}}", i)
+                        format!("(Value){{.type = TYPE_INT, .u = {{.int_val = {i}LL}}}}")
                     }
                     Literal::Str(s) => format!(
                         "(Value){{.type = TYPE_STR, .u = {{.str_val = \"{}\" }}}}",
@@ -753,26 +767,17 @@ impl<'a> CodeBuilder<'a> {
             Expression::Identifier(id) => (
                 String::new(),
                 if self.is_gadget(id) {
-                    format!(
-                        "(Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{}_start}}}}",
-                        id
-                    )
+                    format!("(Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{id}_start}}}}")
                 } else {
-                    format!("v_{}", id)
+                    format!("v_{id}")
                 },
             ),
             Expression::Binary(b) => {
                 let (code1, val1) = self.generate_expr(&b.lhs);
                 let (code2, val2) = self.generate_expr(&b.rhs);
                 let mut code = code1 + &code2;
-                code.push_str(&format!(
-                    "if ({}.type != TYPE_INT) return ERR_TYPE;\n",
-                    val1
-                ));
-                code.push_str(&format!(
-                    "if ({}.type != TYPE_INT) return ERR_TYPE;\n",
-                    val2
-                ));
+                code.push_str(&format!("if ({val1}.type != TYPE_INT) return ERR_TYPE;\n"));
+                code.push_str(&format!("if ({val2}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let op_str = match b.op {
                     BinOp::Add => "+",
                     BinOp::Sub => "-",
@@ -786,28 +791,26 @@ impl<'a> CodeBuilder<'a> {
                     BinOp::Shr => ">>",
                 };
                 let val = format!(
-                    "(Value){{.type = TYPE_INT, .u = {{.int_val = {}.u.int_val {} {}.u.int_val}}}}",
-                    val1, op_str, val2
+                    "(Value){{.type = TYPE_INT, .u = {{.int_val = {val1}.u.int_val {op_str} {val2}.u.int_val}}}}"
                 );
                 (code, val)
             }
             Expression::Unary(u) => {
                 let (code, val) = self.generate_expr(&u.operand);
                 let mut c = code;
-                c.push_str(&format!("if ({}.type != TYPE_INT) return ERR_TYPE;\n", val));
+                c.push_str(&format!("if ({val}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let op_str = match u.op {
                     UnaryOp::Not => "!",
                 };
                 let res = format!(
-                    "(Value){{.type = TYPE_INT, .u = {{.int_val = {}{}.u.int_val}}}}",
-                    op_str, val
+                    "(Value){{.type = TYPE_INT, .u = {{.int_val = {op_str}{val}.u.int_val}}}}"
                 );
                 (c, res)
             }
             Expression::StackRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("off = {};\n", val));
+                code.push_str(&format!("off = {val};\n"));
                 code.push_str("if (off.type != TYPE_INT) return ERR_TYPE;\n");
                 code.push_str("off_val = off.u.int_val;\n");
                 code.push_str("if (off_val < 0 || off_val >= sp) return ERR_BOUNDS;\n");
@@ -817,7 +820,7 @@ impl<'a> CodeBuilder<'a> {
             Expression::MemoryRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("mem_off = {};\n", val));
+                code.push_str(&format!("mem_off = {val};\n"));
                 code.push_str("if (mem_off.type != TYPE_INT) return ERR_TYPE;\n");
                 code.push_str("mem_off_val = mem_off.u.int_val;\n");
                 code.push_str(
@@ -842,7 +845,7 @@ impl<'a> CodeBuilder<'a> {
         }
 
         for identifier in unique_identifiers {
-            defs.push_str(&format!("Value v_{};\n", identifier));
+            defs.push_str(&format!("Value v_{identifier};\n"));
         }
 
         defs

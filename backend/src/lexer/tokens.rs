@@ -1,17 +1,17 @@
 //! All lexical categories recognised by the lexer.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Token {
-    pub kind: TokenKind,
+pub struct Token<'a> {
+    pub kind: TokenKind<'a>,
     pub line: usize,   // 1-based
-    pub column: usize, // 1-based (UTF-8 byte offset is also fine)
+    pub column: usize, // 1-based
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenKind {
-    Identifier(String),
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum TokenKind<'a> {
+    Identifier(&'a str),
     Int(i64),
-    Str(String),
+    Str(&'a str),
 
     External,
     Dot,
@@ -59,10 +59,10 @@ pub enum TokenKind {
     Eof,
 }
 
-impl Token {
-    pub fn at(kind: TokenKind, src: &str, offset: usize) -> Self {
+impl Token<'_> {
+    pub fn at<'a>(kind: TokenKind<'a>, src: &str, offset: usize) -> Token<'a> {
         let (line, column) = crate::utils::loc::byte_offset_to_line_col(src, offset);
 
-        Self { kind, line, column }
+        Token { kind, line, column }
     }
 }

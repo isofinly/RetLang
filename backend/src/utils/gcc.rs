@@ -11,9 +11,9 @@ pub enum CompilerError {
 impl fmt::Display for CompilerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompilerError::Io(e) => write!(f, "IO error: {}", e),
+            CompilerError::Io(e) => write!(f, "IO error: {e}"),
             CompilerError::ExitFailure(code, stderr) => {
-                write!(f, "Compiler exited with code {}: {}", code, stderr)
+                write!(f, "Compiler exited with code {code}: {stderr}")
             }
             CompilerError::NotFound => {
                 write!(f, "No suitable C compiler (clang or gcc) found in $PATH")
@@ -61,7 +61,7 @@ pub fn compile_c(src_path: &str, out_path: &str, libs: &[String]) -> Result<(), 
     cmd.arg("-Wall").arg("-std=c99").arg("-O3");
 
     let actual_out = if cfg!(windows) && !out_path.ends_with(".exe") {
-        format!("{}.exe", out_path)
+        format!("{out_path}.exe")
     } else {
         out_path.to_string()
     };
@@ -69,7 +69,7 @@ pub fn compile_c(src_path: &str, out_path: &str, libs: &[String]) -> Result<(), 
     cmd.arg(src_path).arg("-o").arg(&actual_out);
 
     for lib in libs.iter().filter(|l| !l.is_empty()) {
-        cmd.arg(format!("-l{}", lib));
+        cmd.arg(format!("-l{lib}"));
     }
 
     let Output { status, stderr, .. } = cmd.output().map_err(CompilerError::Io)?;

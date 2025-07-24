@@ -7,6 +7,8 @@ use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, MietteHandlerOpts, Result};
 use std::path::PathBuf;
 
+use crate::utils::gcc::compile_c;
+
 #[derive(Parser)]
 #[command(
     name = "ret-lang",
@@ -53,16 +55,14 @@ fn main() -> Result<()> {
         Cmd::Lex { input } => {
             let src = std::fs::read_to_string(&input).into_diagnostic()?;
             let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
-            tokens.into_iter().for_each(|t| {
-                println!("{:?}", t);
-            });
+            tokens.into_iter().for_each(|t| println!("{t:?}"));
         }
 
         Cmd::Parse { input } => {
             let src = std::fs::read_to_string(&input).into_diagnostic()?;
             let tokens = lexer::core::lex(input.file_name().unwrap().to_str().unwrap(), &src)?;
             let ast = parser::core::parse(tokens.as_slice())?;
-            println!("{:?}", ast);
+            println!("{ast:?}");
         }
 
         Cmd::Transpile { input, output } => {
@@ -93,16 +93,16 @@ fn main() -> Result<()> {
             let mut c_source_path = output.clone();
             c_source_path.set_extension("c");
             std::fs::write(&c_source_path, obj_bin).into_diagnostic()?;
-            match utils::gcc::compile_c(
+            match compile_c(
                 c_source_path.to_str().unwrap(),
                 output.to_str().unwrap(),
-                &libraries.as_slice(),
+                libraries.as_slice(),
             ) {
                 Ok(_) => {
                     println!("Compilation successful");
                 }
                 Err(e) => {
-                    eprintln!("Compilation failed: {}", e);
+                    eprintln!("Compilation failed: {e:?}");
                     std::process::exit(1);
                 }
             }

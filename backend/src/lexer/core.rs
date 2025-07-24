@@ -13,7 +13,7 @@ fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
 
-pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
+pub fn lex<'a>(filename: &str, contents: &'a str) -> miette::Result<Vec<Token<'a>>> {
     use TokenKind::*;
 
     let mut tokens = Vec::new();
@@ -55,7 +55,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                 "if" => If,
                 "then" => Then,
                 "external" => External,
-                _ => Identifier(text.to_owned()),
+                _ => Identifier(text),
             };
 
             tokens.push(Token::at(kind, contents, start));
@@ -80,7 +80,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                     contents,
                     span,
                     "invalid number",
-                    "numbers cannot be immediately followed by identifier characters".to_string(),
+                    "numbers cannot be immediately followed by identifier characters",
                 )
                 .into());
             }
@@ -103,7 +103,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
             let inside = &contents[start + 1..i];
             i += 1; // skip closing quote
 
-            tokens.push(Token::at(Str(inside.to_owned()), contents, start));
+            tokens.push(Token::at(Str(inside), contents, start));
             continue;
         }
 
@@ -117,7 +117,7 @@ pub fn lex(filename: &str, contents: &str) -> miette::Result<Vec<Token>> {
                     contents,
                     miette::SourceSpan::new(i.into(), contents[i..i + 3].chars().count()),
                     "Not supported",
-                    "Operands <<= and >>= are not supported".to_string(),
+                    "Operands <<= and >>= are not supported",
                 )
                 .into());
             }
@@ -197,7 +197,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba".to_string()),
+                kind: TokenKind::Identifier("aboba"),
                 line: 1,
                 column: 12,
             },
@@ -207,7 +207,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 1,
                 column: 18,
             },
@@ -243,7 +243,7 @@ mod tests {
                 column: 9,
             },
             Token {
-                kind: TokenKind::Str("aboba.h".to_string()),
+                kind: TokenKind::Str("aboba.h"),
                 line: 1,
                 column: 11,
             },
@@ -279,7 +279,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba".to_string()),
+                kind: TokenKind::Identifier("aboba"),
                 line: 1,
                 column: 12,
             },
@@ -289,7 +289,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 1,
                 column: 18,
             },
@@ -314,7 +314,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba2".to_string()),
+                kind: TokenKind::Identifier("aboba2"),
                 line: 2,
                 column: 12,
             },
@@ -324,7 +324,7 @@ mod tests {
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 2,
                 column: 19,
             },
@@ -419,12 +419,12 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("Gadget")),
+                kind: TokenKind::Identifier(("Gadget")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("Push")),
+                kind: TokenKind::Identifier(("Push")),
                 line: 2,
                 column: 1,
             },
@@ -444,7 +444,7 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("gadgetifthenret")),
+                kind: TokenKind::Identifier(("gadgetifthenret")),
                 line: 1,
                 column: 1,
             },
@@ -464,22 +464,22 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("foo")),
+                kind: TokenKind::Identifier(("foo")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("bar_123")),
+                kind: TokenKind::Identifier(("bar_123")),
                 line: 1,
                 column: 5,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("_var")),
+                kind: TokenKind::Identifier(("_var")),
                 line: 1,
                 column: 13,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("A1")),
+                kind: TokenKind::Identifier(("A1")),
                 line: 1,
                 column: 18,
             },
@@ -508,19 +508,19 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("a")),
+                kind: TokenKind::Identifier(("a")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("z_99999999999999999999")),
+                kind: TokenKind::Identifier(("z_99999999999999999999")),
                 line: 2,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from(
+                kind: TokenKind::Identifier(
                     "very_long_identifier_with_many_underscores_and_digits_1234567890",
-                )),
+                ),
                 line: 3,
                 column: 1,
             },
@@ -540,12 +540,12 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("gadget_")),
+                kind: TokenKind::Identifier(("gadget_")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("push1")),
+                kind: TokenKind::Identifier(("push1")),
                 line: 1,
                 column: 9,
             },
@@ -669,18 +669,18 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Str(String::from("hello")),
+                kind: TokenKind::Str(("hello")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Str(String::from("world!")),
+                kind: TokenKind::Str(("world!")),
                 line: 1,
                 column: 9,
             },
             // TODO: Decide how to handle empty strings
             // Token {
-            //     kind: TokenKind::Str(String::from("")),
+            //     kind: TokenKind::Str(("")),
             //     line: 1,
             //     column: 11,
             // },
@@ -716,7 +716,7 @@ mod tests {
         let tokens = lex("testing.ret", input);
         let expected = [
             Token {
-                kind: TokenKind::Str(String::from("!@#$%^&*()_+-=[]{}|;':,./<>?")),
+                kind: TokenKind::Str(("!@#$%^&*()_+-=[]{}|;':,./<>?")),
                 line: 1,
                 column: 1,
             },
@@ -886,7 +886,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("var".to_string()),
+                kind: TokenKind::Identifier("var"),
                 line: 1,
                 column: 2,
             },
@@ -901,7 +901,7 @@ mod tests {
                 column: 7,
             },
             Token {
-                kind: TokenKind::Identifier("x".to_string()),
+                kind: TokenKind::Identifier("x"),
                 line: 1,
                 column: 8,
             },
@@ -911,7 +911,7 @@ mod tests {
                 column: 10,
             },
             Token {
-                kind: TokenKind::Identifier("y".to_string()),
+                kind: TokenKind::Identifier("y"),
                 line: 1,
                 column: 13,
             },
@@ -976,7 +976,7 @@ mod tests {
                 column: 2,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("multi")),
+                kind: TokenKind::Identifier(("multi")),
                 line: 1,
                 column: 4,
             },
@@ -1006,12 +1006,12 @@ mod tests {
         let tokens = lex("testing.ret", input).unwrap();
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("foo")),
+                kind: TokenKind::Identifier(("foo")),
                 line: 1,
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("bar")),
+                kind: TokenKind::Identifier(("bar")),
                 line: 2,
                 column: 1,
             },
@@ -1027,8 +1027,8 @@ mod tests {
 
     #[test]
     fn valid_mixed_all_tokens() {
-        let input = r#"gadget foo: push 42\npop bar // comment\nret "string""#;
-        let tokens = lex("testing.ret", input.replace("\\n", "\n").as_str()).unwrap();
+        let input = r#"gadget foo: push 42\npop bar // comment\nret "string""#.replace("\\n", "\n");
+        let tokens = lex("testing.ret", input.as_str()).unwrap();
         let expected = [
             Token {
                 kind: TokenKind::Gadget,
@@ -1036,7 +1036,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("foo")),
+                kind: TokenKind::Identifier(("foo")),
                 line: 1,
                 column: 8,
             },
@@ -1061,7 +1061,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("bar")),
+                kind: TokenKind::Identifier(("bar")),
                 line: 2,
                 column: 5,
             },
@@ -1071,7 +1071,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Str(String::from("string")),
+                kind: TokenKind::Str(("string")),
                 line: 3,
                 column: 5,
             },
@@ -1087,11 +1087,11 @@ mod tests {
 
     #[test]
     fn edge_no_whitespace_adjacent_tokens() {
-        let input = "a=1+b[2]";
-        let tokens = lex("testing.ret", input.replace("\\n", "\n").as_str()).unwrap();
+        let input = "a=1+b[2]".replace("\\n", "\n");
+        let tokens = lex("testing.ret", input.as_str()).unwrap();
         let expected = [
             Token {
-                kind: TokenKind::Identifier(String::from("a")),
+                kind: TokenKind::Identifier(("a")),
                 line: 1,
                 column: 1,
             },
@@ -1111,7 +1111,7 @@ mod tests {
                 column: 4,
             },
             Token {
-                kind: TokenKind::Identifier(String::from("b")),
+                kind: TokenKind::Identifier(("b")),
                 line: 1,
                 column: 5,
             },

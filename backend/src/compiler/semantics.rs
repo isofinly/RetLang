@@ -59,11 +59,11 @@ fn check_calls(ast: &Program) -> miette::Result<()> {
 // Per-Gadget Analysis
 //
 
-fn collect_uses(expr: &Expression) -> HashSet<Identifier> {
+fn collect_uses<'a>(expr: &Expression<'a>) -> HashSet<Identifier<'a>> {
     let mut uses = HashSet::new();
     match expr {
         Expression::Identifier(id) => {
-            uses.insert(id.clone());
+            uses.insert(*id);
         }
         Expression::MemoryRef(inner) => {
             uses.extend(collect_uses(inner));
@@ -88,36 +88,36 @@ fn collect_uses(expr: &Expression) -> HashSet<Identifier> {
     uses
 }
 
-fn collect_condition_uses(condition: &Condition) -> HashSet<Identifier> {
+fn collect_condition_uses<'a>(condition: &Condition<'a>) -> HashSet<Identifier<'a>> {
     let mut uses = collect_uses(&condition.lhs);
     uses.extend(collect_uses(&condition.rhs));
     uses
 }
 
 /// All identifiers that this instruction *defines*
-fn collect_defs(inst: &Instruction) -> HashSet<Identifier> {
+fn collect_defs<'a>(inst: &Instruction<'a>) -> HashSet<Identifier<'a>> {
     let mut defs = HashSet::new();
     match inst {
         Instruction::Assignment(a) => {
-            defs.insert(a.target.clone());
+            defs.insert(a.target);
         }
         Instruction::StackOp(op) => match op {
             StackOp::Pop(t) => {
-                defs.insert(t.clone());
+                defs.insert(t);
             }
             StackOp::Peek { target, .. } => {
-                defs.insert(target.clone());
+                defs.insert(target);
             }
             _ => {}
         },
         Instruction::Arithmetic(a) => {
-            defs.insert(a.dest.clone());
+            defs.insert(a.dest);
         }
         Instruction::MemoryOp(MemoryOp::Load { target, .. }) => {
-            defs.insert(target.clone());
+            defs.insert(target);
         }
         Instruction::ConditionalMod(c) => {
-            defs.insert(c.target.clone());
+            defs.insert(c.target);
         }
         _ => {}
     }
@@ -127,7 +127,9 @@ fn collect_defs(inst: &Instruction) -> HashSet<Identifier> {
 /// Returns correctly defined local variables per given gadget
 ///
 /// TODO: Maybe take whole `Program` reference instead and output unique identifiers
-pub(crate) fn track_local_variables(gadget: &GadgetDef) -> miette::Result<HashSet<Identifier>> {
+pub(crate) fn track_local_variables<'a>(
+    gadget: &'a GadgetDef,
+) -> miette::Result<HashSet<Identifier<'a>>> {
     // which identifiers can be locals
     let candidate_locals: HashSet<Identifier> = gadget
         .body
@@ -159,7 +161,7 @@ pub(crate) fn track_local_variables(gadget: &GadgetDef) -> miette::Result<HashSe
                     _ => {}
                 },
                 Instruction::Arithmetic(a) => {
-                    uses.insert(a.dest.clone()); // read-modify-write
+                    uses.insert(a.dest); // read-modify-write
                     uses.extend(collect_uses(&a.lhs));
                     uses.extend(collect_uses(&a.rhs));
                 }

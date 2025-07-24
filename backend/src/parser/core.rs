@@ -1,33 +1,38 @@
 use crate::compiler::ast::*;
 use crate::lexer::tokens::{Token, TokenKind};
 use miette::{Result, miette};
+use std::cell::RefCell;
 use std::iter::Peekable;
 use std::slice::Iter;
 
-pub fn parse(tokens: &[Token]) -> Result<Program> {
-    let mut p = Parser {
-        iter: tokens.iter().peekable(),
+pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Program<'a>> {
+    let p = Parser {
+        iter: RefCell::new(tokens.iter().peekable()),
     };
+
     p.program()
 }
 
 struct Parser<'t> {
-    iter: Peekable<Iter<'t, Token>>,
+    iter: RefCell<Peekable<Iter<'t, Token<'t>>>>,
 }
 
 impl<'t> Parser<'t> {
-    fn peek(&mut self) -> Option<&'t TokenKind> {
-        self.iter.peek().map(|t| &t.kind)
+    fn peek(&self) -> Option<&TokenKind<'t>> {
+        self.iter.borrow_mut().peek().map(|t| &t.kind)
     }
-    fn peek_second(&mut self) -> Option<&'t TokenKind> {
-        let mut clone = self.iter.clone();
+
+    fn peek_second(&self) -> Option<&TokenKind<'t>> {
+        let mut clone = self.iter.borrow_mut().clone();
         clone.next()?;
         clone.next().map(|t| &t.kind)
     }
-    fn next(&mut self) -> Option<&'t TokenKind> {
-        self.iter.next().map(|t| &t.kind)
+
+    fn next(&self) -> Option<&TokenKind<'t>> {
+        self.iter.borrow_mut().next().map(|t| &t.kind)
     }
-    fn expect(&mut self, want: TokenKind) -> Result<()> {
+
+    fn expect(&self, want: TokenKind) -> Result<()> {
         if let Some(k) = self.peek() {
             if *k == want {
                 self.next();
@@ -39,24 +44,24 @@ impl<'t> Parser<'t> {
             Err(miette!("expected `{want:?}`, got None"))
         }
     }
-    fn expect_identifier(&mut self) -> Result<String> {
+    fn expect_identifier(&self) -> Result<&'t str> {
         if let Some(TokenKind::Identifier(s)) = self.peek() {
             self.next();
-            Ok(s.clone())
+            Ok(s)
         } else {
             Err(miette!("expected identifier, got {:?}", self.peek()))
         }
     }
-    fn expect_string(&mut self) -> Result<String> {
+    fn expect_string(&self) -> Result<&'t str> {
         if let Some(TokenKind::Str(s)) = self.peek() {
             self.next();
-            Ok(s.clone())
+            Ok(s)
         } else {
             Err(miette!("expected string literal, got {:?}", self.peek()))
         }
     }
 
-    fn is_arith_op(&mut self, kind: &TokenKind) -> bool {
+    fn is_arith_op(&self, kind: &TokenKind) -> bool {
         matches!(
             kind,
             TokenKind::Plus
@@ -72,8 +77,8 @@ impl<'t> Parser<'t> {
         )
     }
 
-    fn is_stack_expression(&mut self) -> bool {
-        let mut iter_clone = self.iter.clone();
+    fn is_stack_expression(&self) -> bool {
+        let mut iter_clone = self.iter.borrow_mut().clone();
         if let Some(first) = iter_clone.next() {
             if matches!(first.kind, TokenKind::Stack) {
                 if let Some(second) = iter_clone.next() {
@@ -84,7 +89,7 @@ impl<'t> Parser<'t> {
         false
     }
 
-    fn program(&mut self) -> Result<Program> {
+    fn program(&self) -> Result<Program<'t>> {
         let mut externals = Vec::new();
         while matches!(self.peek(), Some(TokenKind::External)) {
             externals.push(self.external()?);
@@ -106,13 +111,13 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn external(&mut self) -> Result<Header> {
+    fn external(&self) -> Result<Header<'t>> {
         self.expect(TokenKind::External)?;
         self.expect(TokenKind::Colon)?;
         let header = match self.peek() {
             Some(TokenKind::Lt) => {
                 self.expect(TokenKind::Lt)?;
-                let mut parts: Vec<String> = vec![self.expect_identifier()?];
+                let mut parts = vec![self.expect_identifier()?];
                 while matches!(self.peek(), Some(TokenKind::Dot)) {
                     self.expect(TokenKind::Dot)?;
                     parts.push(self.expect_identifier()?);
@@ -129,7 +134,7 @@ impl<'t> Parser<'t> {
         Ok(header)
     }
 
-    fn gadget_definition(&mut self) -> Result<GadgetDef> {
+    fn gadget_definition(&self) -> Result<GadgetDef<'t>> {
         self.expect(TokenKind::Gadget)?;
         let name = self.expect_identifier()?;
         self.expect(TokenKind::Colon)?;
@@ -141,7 +146,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn gadget_body(&mut self) -> Result<GadgetBody> {
+    fn gadget_body(&self) -> Result<GadgetBody<'t>> {
         let mut instrs = Vec::new();
         while !matches!(self.peek(), Some(TokenKind::Ret)) {
             instrs.push(self.instruction()?);
@@ -153,7 +158,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn instruction(&mut self) -> Result<Instruction> {
+    fn instruction(&self) -> Result<Instruction<'t>> {
         Ok(match self.peek() {
             Some(TokenKind::Identifier(_)) => match self.peek_second() {
                 Some(TokenKind::Assign) => Instruction::Assignment(self.assignment()?),
@@ -175,7 +180,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn call(&mut self) -> Result<Call> {
+    fn call(&self) -> Result<Call<'t>> {
         let callee = self.expect_identifier()?;
         self.expect(TokenKind::LParen)?;
 
@@ -195,14 +200,14 @@ impl<'t> Parser<'t> {
         Ok(Call { callee, args })
     }
 
-    fn assignment(&mut self) -> Result<Assignment> {
+    fn assignment(&self) -> Result<Assignment<'t>> {
         let target = self.expect_identifier()?;
         self.expect(TokenKind::Assign)?;
         let value = self.expression()?;
         Ok(Assignment { target, value })
     }
 
-    fn stack_op(&mut self) -> Result<StackOp> {
+    fn stack_op(&self) -> Result<StackOp<'t>> {
         match self.next() {
             Some(TokenKind::Push) => {
                 let v = self.expression()?;
@@ -231,7 +236,7 @@ impl<'t> Parser<'t> {
         }
     }
 
-    fn arithmetic(&mut self) -> Result<Arithmetic> {
+    fn arithmetic(&self) -> Result<Arithmetic<'t>> {
         let dest = self.expect_identifier()?;
         let op1 = self.arith_op()?;
         self.expect(TokenKind::Assign)?;
@@ -249,7 +254,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn arith_op(&mut self) -> Result<ArithOp> {
+    fn arith_op(&self) -> Result<ArithOp> {
         Ok(match self.next() {
             Some(TokenKind::Plus) => ArithOp::Add,
             Some(TokenKind::Minus) => ArithOp::Sub,
@@ -265,7 +270,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn memory_op(&mut self) -> Result<MemoryOp> {
+    fn memory_op(&self) -> Result<MemoryOp<'t>> {
         match self.next() {
             Some(TokenKind::Store) => {
                 let val = self.expression()?;
@@ -287,7 +292,7 @@ impl<'t> Parser<'t> {
         }
     }
 
-    fn conditional_mod(&mut self) -> Result<ConditionalMod> {
+    fn conditional_mod(&self) -> Result<ConditionalMod<'t>> {
         self.expect(TokenKind::If)?;
         let cond = self.condition()?;
         self.expect(TokenKind::Then)?;
@@ -301,14 +306,14 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn condition(&mut self) -> Result<Condition> {
+    fn condition(&self) -> Result<Condition<'t>> {
         let lhs = self.expression()?;
         let op = self.comp_op()?;
         let rhs = self.expression()?;
         Ok(Condition { lhs, op, rhs })
     }
 
-    fn comp_op(&mut self) -> Result<CompOp> {
+    fn comp_op(&self) -> Result<CompOp> {
         Ok(match self.next() {
             Some(TokenKind::EqEq) => CompOp::Eq,
             Some(TokenKind::NotEq) => CompOp::Ne,
@@ -320,7 +325,7 @@ impl<'t> Parser<'t> {
         })
     }
 
-    fn return_stmt(&mut self) -> Result<ReturnStmt> {
+    fn return_stmt(&self) -> Result<ReturnStmt<'t>> {
         self.expect(TokenKind::Ret)?;
 
         let val = if matches!(
@@ -341,7 +346,7 @@ impl<'t> Parser<'t> {
         Ok(ReturnStmt { value: val })
     }
 
-    fn stack_init(&mut self) -> Result<StackInit> {
+    fn stack_init(&self) -> Result<StackInit<'t>> {
         self.expect(TokenKind::Stack)?;
         self.expect(TokenKind::Colon)?;
         self.expect(TokenKind::LBracket)?;
@@ -356,11 +361,11 @@ impl<'t> Parser<'t> {
         Ok(StackInit { initial: ids })
     }
 
-    fn expression(&mut self) -> Result<Expression> {
+    fn expression(&self) -> Result<Expression<'t>> {
         self.binary_expr(0)
     }
 
-    fn binary_expr(&mut self, min_prec: usize) -> Result<Expression> {
+    fn binary_expr(&self, min_prec: usize) -> Result<Expression<'t>> {
         let mut left = self.primary()?;
         let precedence: &[&[TokenKind]] = &[
             &[TokenKind::Pipe],
@@ -373,7 +378,7 @@ impl<'t> Parser<'t> {
 
         for (prec, ops) in precedence.iter().enumerate().skip(min_prec) {
             while ops.iter().any(|k| matches!(self.peek(), Some(t) if t == k)) {
-                let op_tok = self.next().unwrap().clone();
+                let op_tok = self.next().unwrap();
                 let rhs = self.binary_expr(prec + 1)?;
                 let op = match op_tok {
                     TokenKind::Plus => BinOp::Add,
@@ -394,10 +399,10 @@ impl<'t> Parser<'t> {
         Ok(left)
     }
 
-    fn primary(&mut self) -> Result<Expression> {
+    fn primary(&self) -> Result<Expression<'t>> {
         match self.next() {
             Some(TokenKind::Int(i)) => Ok(Expression::Literal(Literal::Int(*i))),
-            Some(TokenKind::Str(s)) => Ok(Expression::Literal(Literal::Str(s.clone()))),
+            Some(TokenKind::Str(s)) => Ok(Expression::Literal(Literal::Str(s))),
             Some(TokenKind::Identifier(id)) => {
                 if matches!(self.peek(), Some(TokenKind::LParen)) {
                     self.expect(TokenKind::LParen)?;
@@ -413,12 +418,9 @@ impl<'t> Parser<'t> {
                         }
                     }
                     self.expect(TokenKind::RParen)?;
-                    Ok(Expression::Call(Box::new(Call {
-                        callee: id.clone(),
-                        args,
-                    })))
+                    Ok(Expression::Call(Box::new(Call { callee: id, args })))
                 } else {
-                    Ok(Expression::Identifier(id.clone()))
+                    Ok(Expression::Identifier(id))
                 }
             }
             Some(TokenKind::LBracket) => {
@@ -470,7 +472,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba".to_string()),
+                kind: TokenKind::Identifier("aboba"),
                 line: 2,
                 column: 12,
             },
@@ -480,7 +482,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 2,
                 column: 18,
             },
@@ -518,7 +520,7 @@ mod tests {
         let ast = parse(&tokens)?;
 
         let expected = Program {
-            headers: vec![Header::System(vec!["aboba".to_string(), "h".to_string()])],
+            headers: vec![Header::System(vec!["aboba", "h"])],
             gadgets: vec![],
             stack_init: StackInit { initial: vec![] },
         };
@@ -541,7 +543,7 @@ mod tests {
                 column: 9,
             },
             Token {
-                kind: TokenKind::Identifier("aboba.h".to_string()),
+                kind: TokenKind::Identifier("aboba.h"),
                 line: 2,
                 column: 11,
             },
@@ -596,7 +598,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba".to_string()),
+                kind: TokenKind::Identifier("aboba"),
                 line: 2,
                 column: 12,
             },
@@ -606,7 +608,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 2,
                 column: 18,
             },
@@ -631,7 +633,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("aboba2".to_string()),
+                kind: TokenKind::Identifier("aboba2"),
                 line: 3,
                 column: 12,
             },
@@ -641,7 +643,7 @@ mod tests {
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 3,
                 column: 19,
             },
@@ -680,8 +682,8 @@ mod tests {
 
         let expected = Program {
             headers: vec![
-                Header::System(vec!["aboba".to_string(), "h".to_string()]),
-                Header::System(vec!["aboba2".to_string(), "h".to_string()]),
+                Header::System(vec!["aboba", "h"]),
+                Header::System(vec!["aboba2", "h"]),
             ],
             gadgets: vec![],
             stack_init: StackInit { initial: vec![] },
@@ -710,7 +712,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("stdio".to_string()),
+                kind: TokenKind::Identifier("stdio"),
                 line: 2,
                 column: 12,
             },
@@ -720,7 +722,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 2,
                 column: 18,
             },
@@ -735,7 +737,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("main".to_string()),
+                kind: TokenKind::Identifier("main"),
                 line: 4,
                 column: 8,
             },
@@ -765,7 +767,7 @@ mod tests {
                 column: 8,
             },
             Token {
-                kind: TokenKind::Identifier("main".to_string()),
+                kind: TokenKind::Identifier("main"),
                 line: 7,
                 column: 9,
             },
@@ -783,17 +785,17 @@ mod tests {
         let ast = parse(&tokens)?;
 
         let expected = Program {
-            headers: vec![Header::System(vec!["stdio".to_string(), "h".to_string()])],
+            headers: vec![Header::System(vec!["stdio", "h"])],
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "main".to_string(),
+                name: "main",
                 body: GadgetBody {
                     instructions: vec![],
                     ret: ReturnStmt { value: None },
                 },
             }],
             stack_init: StackInit {
-                initial: vec!["main".to_string()],
+                initial: vec!["main"],
             },
         };
 
@@ -849,7 +851,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 8,
             },
@@ -869,7 +871,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 2,
                 column: 2,
             },
@@ -899,7 +901,7 @@ mod tests {
                 column: 3,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 3,
                 column: 10,
             },
@@ -909,7 +911,7 @@ mod tests {
                 column: 12,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 3,
                 column: 14,
             },
@@ -928,7 +930,7 @@ mod tests {
             gadgets: vec![
                 GadgetDef {
                     doc: None,
-                    name: "a".to_string(),
+                    name: "a",
                     body: GadgetBody {
                         instructions: vec![],
                         ret: ReturnStmt { value: None },
@@ -936,7 +938,7 @@ mod tests {
                 },
                 GadgetDef {
                     doc: None,
-                    name: "b".to_string(),
+                    name: "b",
                     body: GadgetBody {
                         instructions: vec![],
                         ret: ReturnStmt { value: None },
@@ -944,7 +946,7 @@ mod tests {
                 },
             ],
             stack_init: StackInit {
-                initial: vec!["a".to_string(), "b".to_string()],
+                initial: vec!["a", "b"],
             },
             headers: vec![],
         };
@@ -962,7 +964,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 8,
             },
@@ -996,7 +998,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("empty".to_string()),
+                kind: TokenKind::Identifier("empty"),
                 line: 1,
                 column: 8,
             },
@@ -1044,7 +1046,7 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "empty".to_string(),
+                name: "empty",
                 body: GadgetBody {
                     instructions: vec![],
                     ret: ReturnStmt {
@@ -1069,7 +1071,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("test".to_string()),
+                kind: TokenKind::Identifier("test"),
                 line: 1,
                 column: 8,
             },
@@ -1122,7 +1124,7 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "test".to_string(),
+                name: "test",
                 body: GadgetBody {
                     instructions: vec![Instruction::StackOp(StackOp::Push(Expression::Literal(
                         Literal::Int(1),
@@ -1147,7 +1149,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("multi".to_string()),
+                kind: TokenKind::Identifier("multi"),
                 line: 1,
                 column: 8,
             },
@@ -1157,7 +1159,7 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 16,
             },
@@ -1187,7 +1189,7 @@ mod tests {
                 column: 5,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 3,
                 column: 6,
             },
@@ -1230,15 +1232,15 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "multi".to_string(),
+                name: "multi",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::Assignment(Assignment {
-                            target: "a".to_string(),
+                            target: "a",
                             value: Expression::Literal(Literal::Int(1)),
                         }),
                         Instruction::StackOp(StackOp::Push(Expression::Literal(Literal::Int(2)))),
-                        Instruction::StackOp(StackOp::Pop("b".to_string())),
+                        Instruction::StackOp(StackOp::Pop("b")),
                     ],
                     ret: ReturnStmt {
                         value: Some(Expression::Literal(Literal::Int(3))),
@@ -1262,7 +1264,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("no_ret".to_string()),
+                kind: TokenKind::Identifier("no_ret"),
                 line: 1,
                 column: 8,
             },
@@ -1321,7 +1323,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("empty".to_string()),
+                kind: TokenKind::Identifier("empty"),
                 line: 1,
                 column: 8,
             },
@@ -1364,7 +1366,7 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "empty".to_string(),
+                name: "empty",
                 body: GadgetBody {
                     instructions: vec![],
                     ret: ReturnStmt { value: None },
@@ -1387,7 +1389,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("assign".to_string()),
+                kind: TokenKind::Identifier("assign"),
                 line: 1,
                 column: 8,
             },
@@ -1397,7 +1399,7 @@ mod tests {
                 column: 15,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 17,
             },
@@ -1445,10 +1447,10 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "assign".to_string(),
+                name: "assign",
                 body: GadgetBody {
                     instructions: vec![Instruction::Assignment(Assignment {
-                        target: "a".to_string(),
+                        target: "a",
                         value: Expression::Literal(Literal::Int(42)),
                     })],
                     ret: ReturnStmt { value: None },
@@ -1471,7 +1473,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -1481,7 +1483,7 @@ mod tests {
                 column: 12,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 14,
             },
@@ -1535,7 +1537,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("nest".to_string()),
+                kind: TokenKind::Identifier("nest"),
                 line: 1,
                 column: 8,
             },
@@ -1545,7 +1547,7 @@ mod tests {
                 column: 13,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 15,
             },
@@ -1560,7 +1562,7 @@ mod tests {
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 19,
             },
@@ -1638,14 +1640,12 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "nest".to_string(),
+                name: "nest",
                 body: GadgetBody {
                     instructions: vec![Instruction::Assignment(Assignment {
-                        target: "a".to_string(),
+                        target: "a",
                         value: Expression::Binary(Box::new(BinaryExpr {
-                            lhs: Expression::MemoryRef(Box::new(Expression::Identifier(
-                                "b".to_string(),
-                            ))),
+                            lhs: Expression::MemoryRef(Box::new(Expression::Identifier("b"))),
                             op: BinOp::Add,
                             rhs: Expression::StackRef(Box::new(Expression::Binary(Box::new(
                                 BinaryExpr {
@@ -1676,7 +1676,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("stacks".to_string()),
+                kind: TokenKind::Identifier("stacks"),
                 line: 1,
                 column: 8,
             },
@@ -1701,7 +1701,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 2,
                 column: 5,
             },
@@ -1711,7 +1711,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 3,
                 column: 6,
             },
@@ -1779,13 +1779,13 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "stacks".to_string(),
+                name: "stacks",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::StackOp(StackOp::Push(Expression::Literal(Literal::Int(1)))),
-                        Instruction::StackOp(StackOp::Pop("a".to_string())),
+                        Instruction::StackOp(StackOp::Pop("a")),
                         Instruction::StackOp(StackOp::Peek {
-                            target: "b".to_string(),
+                            target: "b",
                             offset: Expression::Literal(Literal::Int(2)),
                         }),
                         Instruction::StackOp(StackOp::Swap {
@@ -1813,7 +1813,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -1872,7 +1872,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("edge".to_string()),
+                kind: TokenKind::Identifier("edge"),
                 line: 1,
                 column: 8,
             },
@@ -1887,7 +1887,7 @@ mod tests {
                 column: 15,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 20,
             },
@@ -1917,7 +1917,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Str("zero".to_string()),
+                kind: TokenKind::Str("zero"),
                 line: 2,
                 column: 13,
             },
@@ -1955,16 +1955,16 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "edge".to_string(),
+                name: "edge",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::StackOp(StackOp::Peek {
-                            target: "a".to_string(),
+                            target: "a",
                             offset: Expression::Literal(Literal::Int(0)),
                         }),
                         Instruction::StackOp(StackOp::Swap {
                             left: Expression::Literal(Literal::Int(0)),
-                            right: Expression::Literal(Literal::Str("zero".to_string())),
+                            right: Expression::Literal(Literal::Str("zero")),
                         }),
                     ],
                     ret: ReturnStmt { value: None },
@@ -1987,7 +1987,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("arith".to_string()),
+                kind: TokenKind::Identifier("arith"),
                 line: 1,
                 column: 8,
             },
@@ -1997,7 +1997,7 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 16,
             },
@@ -2012,7 +2012,7 @@ mod tests {
                 column: 19,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 21,
             },
@@ -2022,7 +2022,7 @@ mod tests {
                 column: 23,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 24,
             },
@@ -2060,14 +2060,14 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "arith".to_string(),
+                name: "arith",
                 body: GadgetBody {
                     instructions: vec![Instruction::Arithmetic(Arithmetic {
-                        dest: "a".to_string(),
+                        dest: "a",
                         op: ArithOp::Add,
-                        lhs: Expression::Identifier("b".to_string()),
+                        lhs: Expression::Identifier("b"),
                         rhs_op: ArithOp::Sub,
-                        rhs: Expression::Identifier("c".to_string()),
+                        rhs: Expression::Identifier("c"),
                     })],
                     ret: ReturnStmt { value: None },
                 },
@@ -2089,7 +2089,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -2099,7 +2099,7 @@ mod tests {
                 column: 12,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 14,
             },
@@ -2114,7 +2114,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 19,
             },
@@ -2163,7 +2163,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("edge".to_string()),
+                kind: TokenKind::Identifier("edge"),
                 line: 1,
                 column: 8,
             },
@@ -2173,7 +2173,7 @@ mod tests {
                 column: 13,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 15,
             },
@@ -2188,7 +2188,7 @@ mod tests {
                 column: 20,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 21,
             },
@@ -2198,7 +2198,7 @@ mod tests {
                 column: 23,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 26,
             },
@@ -2236,14 +2236,14 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "edge".to_string(),
+                name: "edge",
                 body: GadgetBody {
                     instructions: vec![Instruction::Arithmetic(Arithmetic {
-                        dest: "a".to_string(),
+                        dest: "a",
                         op: ArithOp::Shl,
-                        lhs: Expression::Identifier("b".to_string()),
+                        lhs: Expression::Identifier("b"),
                         rhs_op: ArithOp::Shr,
-                        rhs: Expression::Identifier("c".to_string()),
+                        rhs: Expression::Identifier("c"),
                     })],
                     ret: ReturnStmt { value: None },
                 },
@@ -2265,7 +2265,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("mem".to_string()),
+                kind: TokenKind::Identifier("mem"),
                 line: 1,
                 column: 8,
             },
@@ -2280,12 +2280,12 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 19,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 21,
             },
@@ -2295,12 +2295,12 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 2,
                 column: 2,
             },
             Token {
-                kind: TokenKind::Identifier("d".to_string()),
+                kind: TokenKind::Identifier("d"),
                 line: 2,
                 column: 7,
             },
@@ -2338,16 +2338,16 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "mem".to_string(),
+                name: "mem",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::MemoryOp(MemoryOp::Store {
-                            value: Expression::Identifier("a".to_string()),
-                            address: Expression::Identifier("b".to_string()),
+                            value: Expression::Identifier("a"),
+                            address: Expression::Identifier("b"),
                         }),
                         Instruction::MemoryOp(MemoryOp::Load {
-                            target: "c".to_string(),
-                            address: Expression::Identifier("d".to_string()),
+                            target: "c",
+                            address: Expression::Identifier("d"),
                         }),
                     ],
                     ret: ReturnStmt { value: None },
@@ -2370,7 +2370,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -2385,17 +2385,17 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 19,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 21,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 23,
             },
@@ -2444,7 +2444,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("cond".to_string()),
+                kind: TokenKind::Identifier("cond"),
                 line: 1,
                 column: 8,
             },
@@ -2459,7 +2459,7 @@ mod tests {
                 column: 15,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 17,
             },
@@ -2469,7 +2469,7 @@ mod tests {
                 column: 20,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 21,
             },
@@ -2479,7 +2479,7 @@ mod tests {
                 column: 23,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 28,
             },
@@ -2527,15 +2527,15 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "cond".to_string(),
+                name: "cond",
                 body: GadgetBody {
                     instructions: vec![Instruction::ConditionalMod(ConditionalMod {
                         condition: Condition {
-                            lhs: Expression::Identifier("a".to_string()),
+                            lhs: Expression::Identifier("a"),
                             op: CompOp::Eq,
-                            rhs: Expression::Identifier("b".to_string()),
+                            rhs: Expression::Identifier("b"),
                         },
-                        target: "c".to_string(),
+                        target: "c",
                         value: Expression::Literal(Literal::Int(1)),
                     })],
                     ret: ReturnStmt { value: None },
@@ -2558,7 +2558,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -2573,7 +2573,7 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 16,
             },
@@ -2583,12 +2583,12 @@ mod tests {
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 19,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 21,
             },
@@ -2647,7 +2647,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("edge".to_string()),
+                kind: TokenKind::Identifier("edge"),
                 line: 1,
                 column: 8,
             },
@@ -2667,7 +2667,7 @@ mod tests {
                 column: 16,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 17,
             },
@@ -2702,7 +2702,7 @@ mod tests {
                 column: 33,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 34,
             },
@@ -2727,7 +2727,7 @@ mod tests {
                 column: 41,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 46,
             },
@@ -2737,7 +2737,7 @@ mod tests {
                 column: 48,
             },
             Token {
-                kind: TokenKind::Str("str".to_string()),
+                kind: TokenKind::Str("str"),
                 line: 1,
                 column: 49,
             },
@@ -2775,28 +2775,24 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "edge".to_string(),
+                name: "edge",
                 body: GadgetBody {
                     instructions: vec![Instruction::ConditionalMod(ConditionalMod {
                         condition: Condition {
                             lhs: Expression::Binary(Box::new(BinaryExpr {
-                                lhs: Expression::MemoryRef(Box::new(Expression::Identifier(
-                                    "a".to_string(),
-                                ))),
+                                lhs: Expression::MemoryRef(Box::new(Expression::Identifier("a"))),
                                 op: BinOp::Add,
                                 rhs: Expression::Literal(Literal::Int(1)),
                             })),
                             op: CompOp::Ge,
                             rhs: Expression::Binary(Box::new(BinaryExpr {
-                                lhs: Expression::StackRef(Box::new(Expression::Identifier(
-                                    "b".to_string(),
-                                ))),
+                                lhs: Expression::StackRef(Box::new(Expression::Identifier("b"))),
                                 op: BinOp::Sub,
                                 rhs: Expression::Literal(Literal::Int(2)),
                             })),
                         },
-                        target: "c".to_string(),
-                        value: Expression::Literal(Literal::Str("str".to_string())),
+                        target: "c",
+                        value: Expression::Literal(Literal::Str("str")),
                     })],
                     ret: ReturnStmt { value: None },
                 },
@@ -2818,7 +2814,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("expr".to_string()),
+                kind: TokenKind::Identifier("expr"),
                 line: 1,
                 column: 8,
             },
@@ -2843,7 +2839,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Str("str".to_string()),
+                kind: TokenKind::Str("str"),
                 line: 2,
                 column: 6,
             },
@@ -2853,7 +2849,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 3,
                 column: 6,
             },
@@ -2868,7 +2864,7 @@ mod tests {
                 column: 6,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 4,
                 column: 7,
             },
@@ -2893,7 +2889,7 @@ mod tests {
                 column: 12,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 5,
                 column: 13,
             },
@@ -2966,21 +2962,19 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "expr".to_string(),
+                name: "expr",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::StackOp(StackOp::Push(Expression::Literal(Literal::Int(42)))),
                         Instruction::StackOp(StackOp::Push(Expression::Literal(Literal::Str(
-                            "str".to_string(),
+                            "str",
                         )))),
-                        Instruction::StackOp(StackOp::Push(Expression::Identifier(
-                            "a".to_string(),
-                        ))),
+                        Instruction::StackOp(StackOp::Push(Expression::Identifier("a"))),
                         Instruction::StackOp(StackOp::Push(Expression::MemoryRef(Box::new(
-                            Expression::Identifier("b".to_string()),
+                            Expression::Identifier("b"),
                         )))),
                         Instruction::StackOp(StackOp::Push(Expression::StackRef(Box::new(
-                            Expression::Identifier("c".to_string()),
+                            Expression::Identifier("c"),
                         )))),
                         Instruction::StackOp(StackOp::Push(Expression::Binary(Box::new(
                             BinaryExpr {
@@ -3014,7 +3008,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -3034,7 +3028,7 @@ mod tests {
                 column: 19,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 20,
             },
@@ -3083,7 +3077,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("deep".to_string()),
+                kind: TokenKind::Identifier("deep"),
                 line: 1,
                 column: 8,
             },
@@ -3123,7 +3117,7 @@ mod tests {
                 column: 29,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 30,
             },
@@ -3138,7 +3132,7 @@ mod tests {
                 column: 33,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 34,
             },
@@ -3158,7 +3152,7 @@ mod tests {
                 column: 38,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 39,
             },
@@ -3211,22 +3205,22 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "deep".to_string(),
+                name: "deep",
                 body: GadgetBody {
                     instructions: vec![Instruction::StackOp(StackOp::Push(Expression::MemoryRef(
                         Box::new(Expression::MemoryRef(Box::new(Expression::StackRef(
                             Box::new(Expression::Binary(Box::new(BinaryExpr {
                                 lhs: Expression::MemoryRef(Box::new(Expression::Binary(Box::new(
                                     BinaryExpr {
-                                        lhs: Expression::Identifier("a".to_string()),
+                                        lhs: Expression::Identifier("a"),
                                         op: BinOp::Add,
                                         rhs: Expression::MemoryRef(Box::new(
-                                            Expression::Identifier("b".to_string()),
+                                            Expression::Identifier("b"),
                                         )),
                                     },
                                 )))),
                                 op: BinOp::Mul,
-                                rhs: Expression::Identifier("c".to_string()),
+                                rhs: Expression::Identifier("c"),
                             }))),
                         )))),
                     )))],
@@ -3250,7 +3244,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("call".to_string()),
+                kind: TokenKind::Identifier("call"),
                 line: 1,
                 column: 8,
             },
@@ -3260,12 +3254,12 @@ mod tests {
                 column: 13,
             },
             Token {
-                kind: TokenKind::Identifier("call".to_string()),
+                kind: TokenKind::Identifier("call"),
                 line: 1,
                 column: 15,
             },
             Token {
-                kind: TokenKind::Identifier("foo".to_string()),
+                kind: TokenKind::Identifier("foo"),
                 line: 1,
                 column: 20,
             },
@@ -3314,7 +3308,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("unary".to_string()),
+                kind: TokenKind::Identifier("unary"),
                 line: 1,
                 column: 8,
             },
@@ -3334,7 +3328,7 @@ mod tests {
                 column: 21,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 22,
             },
@@ -3372,12 +3366,12 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "unary".to_string(),
+                name: "unary",
                 body: GadgetBody {
                     instructions: vec![Instruction::StackOp(StackOp::Push(Expression::Unary(
                         Box::new(UnaryExpr {
                             op: UnaryOp::Not,
-                            operand: Expression::Identifier("a".to_string()),
+                            operand: Expression::Identifier("a"),
                         }),
                     )))],
                     ret: ReturnStmt { value: None },
@@ -3400,7 +3394,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("nested_unary".to_string()),
+                kind: TokenKind::Identifier("nested_unary"),
                 line: 1,
                 column: 8,
             },
@@ -3425,7 +3419,7 @@ mod tests {
                 column: 29,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 30,
             },
@@ -3463,14 +3457,14 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "nested_unary".to_string(),
+                name: "nested_unary",
                 body: GadgetBody {
                     instructions: vec![Instruction::StackOp(StackOp::Push(Expression::Unary(
                         Box::new(UnaryExpr {
                             op: UnaryOp::Not,
                             operand: Expression::Unary(Box::new(UnaryExpr {
                                 op: UnaryOp::Not,
-                                operand: Expression::Identifier("a".to_string()),
+                                operand: Expression::Identifier("a"),
                             })),
                         }),
                     )))],
@@ -3494,7 +3488,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad_postfix".to_string()),
+                kind: TokenKind::Identifier("bad_postfix"),
                 line: 1,
                 column: 8,
             },
@@ -3509,7 +3503,7 @@ mod tests {
                 column: 22,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 24,
             },
@@ -3563,7 +3557,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("ret1".to_string()),
+                kind: TokenKind::Identifier("ret1"),
                 line: 1,
                 column: 8,
             },
@@ -3583,7 +3577,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("ret2".to_string()),
+                kind: TokenKind::Identifier("ret2"),
                 line: 2,
                 column: 2,
             },
@@ -3598,7 +3592,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 2,
                 column: 15,
             },
@@ -3642,7 +3636,7 @@ mod tests {
             gadgets: vec![
                 GadgetDef {
                     doc: None,
-                    name: "ret1".to_string(),
+                    name: "ret1",
                     body: GadgetBody {
                         instructions: vec![],
                         ret: ReturnStmt { value: None },
@@ -3650,12 +3644,12 @@ mod tests {
                 },
                 GadgetDef {
                     doc: None,
-                    name: "ret2".to_string(),
+                    name: "ret2",
                     body: GadgetBody {
                         instructions: vec![],
                         ret: ReturnStmt {
                             value: Some(Expression::Binary(Box::new(BinaryExpr {
-                                lhs: Expression::Identifier("a".to_string()),
+                                lhs: Expression::Identifier("a"),
                                 op: BinOp::Add,
                                 rhs: Expression::Literal(Literal::Int(1)),
                             }))),
@@ -3680,7 +3674,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -3695,12 +3689,12 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 20,
             },
@@ -3744,7 +3738,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("bad".to_string()),
+                kind: TokenKind::Identifier("bad"),
                 line: 1,
                 column: 8,
             },
@@ -3754,7 +3748,7 @@ mod tests {
                 column: 12,
             },
             Token {
-                kind: TokenKind::Identifier("unknown".to_string()),
+                kind: TokenKind::Identifier("unknown"),
                 line: 1,
                 column: 14,
             },
@@ -3808,7 +3802,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("full".to_string()),
+                kind: TokenKind::Identifier("full"),
                 line: 1,
                 column: 8,
             },
@@ -3818,7 +3812,7 @@ mod tests {
                 column: 13,
             },
             Token {
-                kind: TokenKind::Identifier("a".to_string()),
+                kind: TokenKind::Identifier("a"),
                 line: 1,
                 column: 15,
             },
@@ -3833,7 +3827,7 @@ mod tests {
                 column: 18,
             },
             Token {
-                kind: TokenKind::Identifier("b".to_string()),
+                kind: TokenKind::Identifier("b"),
                 line: 1,
                 column: 20,
             },
@@ -3843,7 +3837,7 @@ mod tests {
                 column: 22,
             },
             Token {
-                kind: TokenKind::Identifier("c".to_string()),
+                kind: TokenKind::Identifier("c"),
                 line: 1,
                 column: 23,
             },
@@ -3858,7 +3852,7 @@ mod tests {
                 column: 7,
             },
             Token {
-                kind: TokenKind::Identifier("d".to_string()),
+                kind: TokenKind::Identifier("d"),
                 line: 2,
                 column: 8,
             },
@@ -3878,7 +3872,7 @@ mod tests {
                 column: 17,
             },
             Token {
-                kind: TokenKind::Identifier("e".to_string()),
+                kind: TokenKind::Identifier("e"),
                 line: 2,
                 column: 18,
             },
@@ -3913,7 +3907,7 @@ mod tests {
                 column: 9,
             },
             Token {
-                kind: TokenKind::Identifier("f".to_string()),
+                kind: TokenKind::Identifier("f"),
                 line: 3,
                 column: 14,
             },
@@ -3923,7 +3917,7 @@ mod tests {
                 column: 16,
             },
             Token {
-                kind: TokenKind::Str("g".to_string()),
+                kind: TokenKind::Str("g"),
                 line: 3,
                 column: 17,
             },
@@ -3933,7 +3927,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("h".to_string()),
+                kind: TokenKind::Identifier("h"),
                 line: 4,
                 column: 6,
             },
@@ -3943,7 +3937,7 @@ mod tests {
                 column: 8,
             },
             Token {
-                kind: TokenKind::Identifier("i".to_string()),
+                kind: TokenKind::Identifier("i"),
                 line: 4,
                 column: 9,
             },
@@ -3953,7 +3947,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("j".to_string()),
+                kind: TokenKind::Identifier("j"),
                 line: 4,
                 column: 12,
             },
@@ -3968,12 +3962,12 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("k".to_string()),
+                kind: TokenKind::Identifier("k"),
                 line: 5,
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("l".to_string()),
+                kind: TokenKind::Identifier("l"),
                 line: 5,
                 column: 13,
             },
@@ -3983,12 +3977,12 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("m".to_string()),
+                kind: TokenKind::Identifier("m"),
                 line: 6,
                 column: 6,
             },
             Token {
-                kind: TokenKind::Identifier("n".to_string()),
+                kind: TokenKind::Identifier("n"),
                 line: 6,
                 column: 8,
             },
@@ -3998,7 +3992,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("o".to_string()),
+                kind: TokenKind::Identifier("o"),
                 line: 7,
                 column: 5,
             },
@@ -4008,7 +4002,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("p".to_string()),
+                kind: TokenKind::Identifier("p"),
                 line: 8,
                 column: 6,
             },
@@ -4018,7 +4012,7 @@ mod tests {
                 column: 8,
             },
             Token {
-                kind: TokenKind::Identifier("q".to_string()),
+                kind: TokenKind::Identifier("q"),
                 line: 8,
                 column: 9,
             },
@@ -4028,7 +4022,7 @@ mod tests {
                 column: 1,
             },
             Token {
-                kind: TokenKind::Identifier("r".to_string()),
+                kind: TokenKind::Identifier("r"),
                 line: 9,
                 column: 5,
             },
@@ -4038,7 +4032,7 @@ mod tests {
                 column: 7,
             },
             Token {
-                kind: TokenKind::Identifier("s".to_string()),
+                kind: TokenKind::Identifier("s"),
                 line: 9,
                 column: 8,
             },
@@ -4058,7 +4052,7 @@ mod tests {
                 column: 8,
             },
             Token {
-                kind: TokenKind::Identifier("t".to_string()),
+                kind: TokenKind::Identifier("t"),
                 line: 10,
                 column: 10,
             },
@@ -4068,7 +4062,7 @@ mod tests {
                 column: 11,
             },
             Token {
-                kind: TokenKind::Identifier("u".to_string()),
+                kind: TokenKind::Identifier("u"),
                 line: 10,
                 column: 13,
             },
@@ -4078,7 +4072,7 @@ mod tests {
                 column: 14,
             },
             Token {
-                kind: TokenKind::Identifier("v".to_string()),
+                kind: TokenKind::Identifier("v"),
                 line: 10,
                 column: 16,
             },
@@ -4096,23 +4090,19 @@ mod tests {
         let expected = Program {
             gadgets: vec![GadgetDef {
                 doc: None,
-                name: "full".to_string(),
+                name: "full",
                 body: GadgetBody {
                     instructions: vec![
                         Instruction::Arithmetic(Arithmetic {
-                            dest: "a".to_string(),
+                            dest: "a",
                             op: ArithOp::Add,
-                            lhs: Expression::Identifier("b".to_string()),
+                            lhs: Expression::Identifier("b"),
                             rhs_op: ArithOp::Sub,
-                            rhs: Expression::Identifier("c".to_string()),
+                            rhs: Expression::Identifier("c"),
                         }),
                         Instruction::MemoryOp(MemoryOp::Store {
-                            value: Expression::MemoryRef(Box::new(Expression::Identifier(
-                                "d".to_string(),
-                            ))),
-                            address: Expression::StackRef(Box::new(Expression::Identifier(
-                                "e".to_string(),
-                            ))),
+                            value: Expression::MemoryRef(Box::new(Expression::Identifier("d"))),
+                            address: Expression::StackRef(Box::new(Expression::Identifier("e"))),
                         }),
                         Instruction::ConditionalMod(ConditionalMod {
                             condition: Condition {
@@ -4120,45 +4110,45 @@ mod tests {
                                 op: CompOp::Lt,
                                 rhs: Expression::Literal(Literal::Int(2)),
                             },
-                            target: "f".to_string(),
-                            value: Expression::Literal(Literal::Str("g".to_string())),
+                            target: "f",
+                            value: Expression::Literal(Literal::Str("g")),
                         }),
                         Instruction::StackOp(StackOp::Peek {
-                            target: "h".to_string(),
+                            target: "h",
                             offset: Expression::Binary(Box::new(BinaryExpr {
-                                lhs: Expression::Identifier("i".to_string()),
+                                lhs: Expression::Identifier("i"),
                                 op: BinOp::Mod,
-                                rhs: Expression::Identifier("j".to_string()),
+                                rhs: Expression::Identifier("j"),
                             })),
                         }),
                         Instruction::StackOp(StackOp::Swap {
-                            left: Expression::Identifier("k".to_string()),
-                            right: Expression::Identifier("l".to_string()),
+                            left: Expression::Identifier("k"),
+                            right: Expression::Identifier("l"),
                         }),
                         Instruction::MemoryOp(MemoryOp::Load {
-                            target: "m".to_string(),
-                            address: Expression::Identifier("n".to_string()),
+                            target: "m",
+                            address: Expression::Identifier("n"),
                         }),
-                        Instruction::StackOp(StackOp::Pop("o".to_string())),
+                        Instruction::StackOp(StackOp::Pop("o")),
                         Instruction::StackOp(StackOp::Push(Expression::Binary(Box::new(
                             BinaryExpr {
-                                lhs: Expression::Identifier("p".to_string()),
+                                lhs: Expression::Identifier("p"),
                                 op: BinOp::Or,
-                                rhs: Expression::Identifier("q".to_string()),
+                                rhs: Expression::Identifier("q"),
                             },
                         )))),
                     ],
                     ret: ReturnStmt {
                         value: Some(Expression::Binary(Box::new(BinaryExpr {
-                            lhs: Expression::Identifier("r".to_string()),
+                            lhs: Expression::Identifier("r"),
                             op: BinOp::Xor,
-                            rhs: Expression::Identifier("s".to_string()),
+                            rhs: Expression::Identifier("s"),
                         }))),
                     },
                 },
             }],
             stack_init: StackInit {
-                initial: vec!["t".to_string(), "u".to_string(), "v".to_string()],
+                initial: vec!["t", "u", "v"],
             },
             headers: vec![],
         };
