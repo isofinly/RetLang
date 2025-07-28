@@ -182,3 +182,4 @@ config.env
 !example.env
 .vscode
 .build
+reports

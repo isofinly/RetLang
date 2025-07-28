@@ -1,0 +1,18 @@
+[package]
+name = "benchmarks"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[dependencies]
+retc = { path = "../backend" }
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "transpiler"
+harness = false
