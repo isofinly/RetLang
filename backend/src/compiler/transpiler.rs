@@ -544,18 +544,18 @@ impl<'a> CodeBuilder<'a> {
         }
     }
 
-    fn get_op_str(&self, op: &ArithOp) -> String {
+    fn get_op_str(&self, op: &ArithOp) -> &'static str {
         match op {
-            ArithOp::Add => "+".to_string(),
-            ArithOp::Sub => "-".to_string(),
-            ArithOp::Mul => "*".to_string(),
-            ArithOp::Div => "/".to_string(),
-            ArithOp::Mod => "%".to_string(),
-            ArithOp::And => "&".to_string(),
-            ArithOp::Or => "|".to_string(),
-            ArithOp::Xor => "^".to_string(),
-            ArithOp::Shl => "<<".to_string(),
-            ArithOp::Shr => ">>".to_string(),
+            ArithOp::Add => "+",
+            ArithOp::Sub => "-",
+            ArithOp::Mul => "*",
+            ArithOp::Div => "/",
+            ArithOp::Mod => "%",
+            ArithOp::And => "&",
+            ArithOp::Or => "|",
+            ArithOp::Xor => "^",
+            ArithOp::Shl => "<<",
+            ArithOp::Shr => ">>",
         }
     }
 
