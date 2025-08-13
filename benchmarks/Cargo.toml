@@ -16,3 +16,7 @@ harness = false
 [[bench]]
 name = "transpiler"
 harness = false
+
+[[bench]]
+name = "push_str"
+harness = false

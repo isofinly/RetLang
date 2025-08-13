@@ -269,79 +269,70 @@ impl<'a> CodeBuilder<'a> {
         let mut code = String::new();
 
         if self.need_defines {
-            code.push_str(super::constants::DEFINES);
-            code.push('\n');
+            code.push_str(&format!("{}\n", super::constants::DEFINES));
         }
 
         if self.need_typedefs {
-            code.push_str(super::constants::TYPEDEFS);
-            code.push('\n');
+            code.push_str(&format!("{}\n", super::constants::TYPEDEFS));
         }
 
         if self.need_includes {
-            code.push_str("#include <stdlib.h>\n");
+            let mut includes = String::from("#include <stdlib.h>\n");
             for header in &self.ast.headers {
                 match header {
                     Header::System(parts) => {
-                        code.push_str(&format!("#include <{}>\n", parts.join(".")));
+                        includes.push_str(&format!("#include <{}>\n", parts.join(".")));
                     }
                     Header::User(s) => {
-                        code.push_str(&format!("#include \"{s}\"\n"));
+                        includes.push_str(&format!("#include \"{s}\"\n"));
                     }
                 }
             }
-            code.push('\n');
+            includes.push('\n');
+            code.push_str(&includes);
         }
 
         if self.need_vars {
             let vars = self.populate_variables(self.ast);
-            code.push_str(&vars);
-            code.push('\n');
+            code.push_str(&format!("{}\n", vars));
         }
 
         if self.need_main {
-            code.push_str("int main() {\n");
-            code.push_str("Value *stack = malloc(INITIAL_CAPACITY * sizeof(Value));\n");
-            code.push_str("if (!stack) return ERR_ALLOC;\n");
-            code.push_str("int sp = 0;\n");
-            code.push_str("int capacity = INITIAL_CAPACITY;\n\n");
-            code.push_str("// Variable declarations for C99 compliance\n");
+            let mut main_code = String::from("int main() {\n");
+            main_code.push_str("Value *stack = malloc(INITIAL_CAPACITY * sizeof(Value));\n");
+            main_code.push_str("if (!stack) return ERR_ALLOC;\n");
+            main_code.push_str("int sp = 0;\n");
+            main_code.push_str("int capacity = INITIAL_CAPACITY;\n\n");
+            main_code.push_str("// Variable declarations for C99 compliance\n");
+
             let used_vars = self.analyze_used_variables();
             if used_vars.contains(&TempVar::Off) {
-                code.push_str("Value off;\n");
-                code.push_str("long long off_val;\n");
+                main_code.push_str("Value off;\nlong long off_val;\n");
             }
             if used_vars.contains(&TempVar::MemOff) {
-                code.push_str("Value mem_off;\n");
-                code.push_str("long long mem_off_val;\n");
+                main_code.push_str("Value mem_off;\nlong long mem_off_val;\n");
             }
             if used_vars.contains(&TempVar::PeekOff) {
-                code.push_str("Value peek_off;\n");
-                code.push_str("long long peek_off_val;\n");
+                main_code.push_str("Value peek_off;\nlong long peek_off_val;\n");
             }
             if used_vars.contains(&TempVar::SwapLeft) {
-                code.push_str("Value swap_left;\n");
-                code.push_str("long long swap_left_val;\n");
-                code.push_str("Value swap_right;\n");
-                code.push_str("long long swap_right_val;\n");
-                code.push_str("Value swap_temp;\n");
+                main_code.push_str("Value swap_left;\nlong long swap_left_val;\nValue swap_right;\nlong long swap_right_val;\nValue swap_temp;\n");
             }
             if used_vars.contains(&TempVar::RetVal) {
-                code.push_str("Value ret_val;\n");
+                main_code.push_str("Value ret_val;\n");
             }
-            code.push_str("Value next;\n");
+            main_code.push_str("Value next;\n");
             if used_vars.contains(&TempVar::BinRes) {
-                code.push_str("Value bin_res;\n");
+                main_code.push_str("Value bin_res;\n");
             }
             if used_vars.contains(&TempVar::AddrVal) {
-                code.push_str("Value mem_addr;\n");
-                code.push_str("long long addr_val;\n");
+                main_code.push_str("Value mem_addr;\nlong long addr_val;\n");
             }
             if used_vars.contains(&TempVar::UnaryRes) {
-                code.push_str("Value unary_res;\n");
+                main_code.push_str("Value unary_res;\n");
             }
             if used_vars.contains(&TempVar::CallRet) {
-                code.push_str("Value call_ret;\n");
+                main_code.push_str("Value call_ret;\n");
             }
             let num_gadgets = self.ast.gadgets.len();
             for i in 1..=num_gadgets {
@@ -350,68 +341,34 @@ impl<'a> CodeBuilder<'a> {
                 } else {
                     format!("ret_top{i}")
                 };
-                code.push_str(&format!("Value {var_name};\n"));
+                main_code.push_str(&format!("Value {var_name};\n"));
             }
-            code.push('\n');
+            main_code.push('\n');
 
             // Add memory array if memory operations are used
             if used_vars.contains(&TempVar::AddrVal) || used_vars.contains(&TempVar::MemOff) {
-                code.push_str("// Memory array for load/store operations\n");
-                code.push_str("Value memory[MEMORY_SIZE];\n");
-                code.push_str("// Initialize memory to zero\n");
-                code.push_str("for (int i = 0; i < MEMORY_SIZE; i++) {\n");
-                code.push_str("memory[i] = (Value){.type = TYPE_INT, .u = {.int_val = 0LL}};\n");
-                code.push_str("}\n\n");
+                main_code.push_str("// Memory array for load/store operations\nValue memory[MEMORY_SIZE];\n// Initialize memory to zero\nfor (int i = 0; i < MEMORY_SIZE; i++) {\nmemory[i] = (Value){.type = TYPE_INT, .u = {.int_val = 0LL}};\n}\n\n");
             }
 
-            code.push_str("// Initialize stack from stack_init ([main] bottom to top)\n");
+            main_code.push_str("// Initialize stack from stack_init ([main] bottom to top)\n");
             for id in &self.ast.stack_init.initial {
-                code.push_str("if (sp >= capacity) {\n");
-                code.push_str("capacity *= 2;\n");
-                code.push_str("stack = realloc(stack, capacity * sizeof(Value));\n");
-                code.push_str("if (!stack) return ERR_ALLOC;\n");
-                code.push_str("}\n");
-                code.push_str(&format!("stack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{id}_start}}}};\n"));
+                main_code.push_str(&format!("if (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) return ERR_ALLOC;\n}}\nstack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{id}_start}}}};\n"));
             }
-            code.push('\n');
-            code.push_str("void *pc = &&start;\n");
-            code.push_str("goto *pc;\n\n");
-            code.push_str("start:\n");
-            code.push_str("if (sp <= 0) goto end;\n");
-            code.push_str("next = stack[--sp];\n");
-            code.push_str("if (next.type != TYPE_LABEL) return ERR_TYPE;\n");
-            code.push_str("pc = next.u.label_val;\n");
-            code.push_str("goto *pc;\n\n");
+            main_code.push_str("\nvoid *pc = &&start;\ngoto *pc;\n\nstart:\nif (sp <= 0) goto end;\nnext = stack[--sp];\nif (next.type != TYPE_LABEL) return ERR_TYPE;\npc = next.u.label_val;\ngoto *pc;\n\n");
 
             let mut ret_top_count = 1u32;
             let referenced_gadgets = self.find_referenced_gadgets();
 
             for gadget in &self.ast.gadgets {
                 if gadget.name == "main" || referenced_gadgets.contains(&gadget.name) {
-                    code.push_str(&self.generate_gadget_code(gadget, &mut ret_top_count));
+                    main_code.push_str(&self.generate_gadget_code(gadget, &mut ret_top_count));
                 } else {
-                    code.push_str("#pragma GCC diagnostic push\n");
-                    code.push_str("#pragma GCC diagnostic ignored \"-Wunused-label\"\n");
-                    code.push_str(&self.generate_gadget_code(gadget, &mut ret_top_count));
-                    code.push_str("#pragma GCC diagnostic pop\n");
+                    main_code.push_str(&format!("#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wunused-label\"\n{}#pragma GCC diagnostic pop\n", self.generate_gadget_code(gadget, &mut ret_top_count)));
                 }
             }
 
-            code.push_str("end_with_error_alloc:\n");
-            code.push_str("free(stack);\n");
-            code.push_str("return ERR_ALLOC;\n\n");
-            code.push_str("end:\n");
-            code.push_str("if (sp > 0) {\n");
-            code.push_str("if (stack[sp - 1].type == TYPE_INT) {\n");
-            code.push_str("printf(\"finish %lld\", stack[sp - 1].u.int_val);\n");
-            code.push_str("} else {\n");
-            code.push_str("free(stack);\n");
-            code.push_str("return ERR_TYPE;\n");
-            code.push_str("}\n");
-            code.push_str("}\n");
-            code.push_str("free(stack);\n");
-            code.push_str("return ERR_SUCCESS;\n");
-            code.push_str("}\n");
+            main_code.push_str("end_with_error_alloc:\nfree(stack);\nreturn ERR_ALLOC;\n\nend:\nif (sp > 0) {\nif (stack[sp - 1].type == TYPE_INT) {\nprintf(\"finish %lld\", stack[sp - 1].u.int_val);\n} else {\nfree(stack);\nreturn ERR_TYPE;\n}\n}\nfree(stack);\nreturn ERR_SUCCESS;\n}\n");
+            code.push_str(&main_code);
         }
 
         code
@@ -450,22 +407,23 @@ impl<'a> CodeBuilder<'a> {
 
             for i in 0..instructions.len() {
                 let label_suff = &suffixes[i];
-                code.push_str(&format!("g_{gadget_name}_{label_suff}:\n"));
-                code.push_str(&format!(
-                    "// {}\n",
-                    self.comment_for_instr(&instructions[i])
+                code.push_str(&format!("g_{gadget_name}_{label_suff}:\n// {}\n{}pc = &&g_{gadget_name}_{};\ngoto *pc;\n\n",
+                    self.comment_for_instr(&instructions[i]),
+                    self.generate_instr_code(&instructions[i]),
+                    suffixes[i + 1]
                 ));
-                code.push_str(&self.generate_instr_code(&instructions[i]));
-                code.push_str(&format!("pc = &&g_{gadget_name}_{};\n", suffixes[i + 1]));
-                code.push_str("goto *pc;\n\n");
             }
 
             let ret_label_suff = &suffixes[instructions.len()];
-            code.push_str(&format!("g_{gadget_name}_{ret_label_suff}:\n"));
-            code.push_str(&self.generate_ret_code(&gadget.body.ret, ret_top_count));
+            code.push_str(&format!(
+                "g_{gadget_name}_{ret_label_suff}:\n{}",
+                self.generate_ret_code(&gadget.body.ret, ret_top_count)
+            ));
         } else {
-            code.push_str(&format!("g_{gadget_name}_start:\n"));
-            code.push_str(&self.generate_ret_code(&gadget.body.ret, ret_top_count));
+            code.push_str(&format!(
+                "g_{gadget_name}_start:\n{}",
+                self.generate_ret_code(&gadget.body.ret, ret_top_count)
+            ));
         }
 
         *ret_top_count += 1;
@@ -521,12 +479,7 @@ impl<'a> CodeBuilder<'a> {
         match instr {
             Instruction::StackOp(StackOp::Push(expr)) => {
                 let (mut c, val) = self.generate_expr(expr);
-                c.push_str("if (sp >= capacity) {\n");
-                c.push_str("capacity *= 2;\n");
-                c.push_str("stack = realloc(stack, capacity * sizeof(Value));\n");
-                c.push_str("if (!stack) goto end_with_error_alloc;\n");
-                c.push_str("}\n");
-                c.push_str(&format!("stack[sp++] = {val};\n"));
+                c.push_str(&format!("if (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) goto end_with_error_alloc;\n}}\nstack[sp++] = {val};\n"));
                 c
             }
             Instruction::StackOp(StackOp::Pop(target)) => {
@@ -534,28 +487,14 @@ impl<'a> CodeBuilder<'a> {
             }
             Instruction::StackOp(StackOp::Peek { target, offset }) => {
                 let (mut c, val) = self.generate_expr(offset);
-                c.push_str(&format!("peek_off = {val};\n"));
-                c.push_str("if (peek_off.type != TYPE_INT) return ERR_TYPE;\n");
-                c.push_str("peek_off_val = peek_off.u.int_val;\n");
-                c.push_str("if (peek_off_val < 0 || peek_off_val >= sp) return ERR_BOUNDS;\n");
-                c.push_str(&format!("v_{target} = stack[sp - 1 - peek_off_val];\n"));
+                c.push_str(&format!("peek_off = {val};\nif (peek_off.type != TYPE_INT) return ERR_TYPE;\npeek_off_val = peek_off.u.int_val;\nif (peek_off_val < 0 || peek_off_val >= sp) return ERR_BOUNDS;\nv_{target} = stack[sp - 1 - peek_off_val];\n"));
                 c
             }
             Instruction::StackOp(StackOp::Swap { left, right }) => {
                 let (mut c, left_val) = self.generate_expr(left);
                 let (right_code, right_val) = self.generate_expr(right);
                 c.push_str(&right_code);
-                c.push_str(&format!("swap_left = {left_val};\n"));
-                c.push_str("if (swap_left.type != TYPE_INT) return ERR_TYPE;\n");
-                c.push_str("swap_left_val = swap_left.u.int_val;\n");
-                c.push_str("if (swap_left_val < 0 || swap_left_val >= sp) return ERR_BOUNDS;\n");
-                c.push_str(&format!("swap_right = {right_val};\n"));
-                c.push_str("if (swap_right.type != TYPE_INT) return ERR_TYPE;\n");
-                c.push_str("swap_right_val = swap_right.u.int_val;\n");
-                c.push_str("if (swap_right_val < 0 || swap_right_val >= sp) return ERR_BOUNDS;\n");
-                c.push_str("swap_temp = stack[sp - 1 - swap_left_val];\n");
-                c.push_str("stack[sp - 1 - swap_left_val] = stack[sp - 1 - swap_right_val];\n");
-                c.push_str("stack[sp - 1 - swap_right_val] = swap_temp;\n");
+                c.push_str(&format!("swap_left = {left_val};\nif (swap_left.type != TYPE_INT) return ERR_TYPE;\nswap_left_val = swap_left.u.int_val;\nif (swap_left_val < 0 || swap_left_val >= sp) return ERR_BOUNDS;\nswap_right = {right_val};\nif (swap_right.type != TYPE_INT) return ERR_TYPE;\nswap_right_val = swap_right.u.int_val;\nif (swap_right_val < 0 || swap_right_val >= sp) return ERR_BOUNDS;\nswap_temp = stack[sp - 1 - swap_left_val];\nstack[sp - 1 - swap_left_val] = stack[sp - 1 - swap_right_val];\nstack[sp - 1 - swap_right_val] = swap_temp;\n"));
                 c
             }
             Instruction::Assignment(ass) => {
@@ -571,22 +510,10 @@ impl<'a> CodeBuilder<'a> {
                 let (c1, v1) = self.generate_expr(&arith.lhs);
                 let (c2, v2) = self.generate_expr(&arith.rhs);
                 let mut c = c1 + &c2;
-                c.push_str(&format!("if ({v1}.type != TYPE_INT) return ERR_TYPE;\n"));
-                c.push_str(&format!("if ({v2}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let inner_op_str = self.get_op_str(&arith.rhs_op);
                 let temp_val = format!("{v1}.u.int_val {inner_op_str} {v2}.u.int_val");
-                c.push_str(&format!(
-                    "bin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {temp_val}}}}};\n",
-                ));
-                c.push_str(&format!(
-                    "if (v_{}.type != TYPE_INT) return ERR_TYPE;\n",
-                    arith.dest
-                ));
                 let op_str = self.get_op_str(&arith.op);
-                c.push_str(&format!(
-                    "v_{}.u.int_val = v_{}.u.int_val {} bin_res.u.int_val;\n",
-                    arith.dest, arith.dest, op_str
-                ));
+                c.push_str(&format!("if ({v1}.type != TYPE_INT) return ERR_TYPE;\nif ({v2}.type != TYPE_INT) return ERR_TYPE;\nbin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {temp_val}}}}};\nif (v_{}.type != TYPE_INT) return ERR_TYPE;\nv_{}.u.int_val = v_{}.u.int_val {} bin_res.u.int_val;\n", arith.dest, arith.dest, arith.dest, op_str));
                 c
             }
             Instruction::MemoryOp(mem_op) => match mem_op {
@@ -594,20 +521,12 @@ impl<'a> CodeBuilder<'a> {
                     let (mut c, val_code) = self.generate_expr(value);
                     let (addr_code, addr_val) = self.generate_expr(address);
                     c.push_str(&addr_code);
-                    c.push_str(&format!("mem_addr = {addr_val};\n"));
-                    c.push_str("if (mem_addr.type != TYPE_INT) return ERR_TYPE;\n");
-                    c.push_str("addr_val = mem_addr.u.int_val;\n");
-                    c.push_str("if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\n");
-                    c.push_str(&format!("memory[addr_val] = {val_code};\n"));
+                    c.push_str(&format!("mem_addr = {addr_val};\nif (mem_addr.type != TYPE_INT) return ERR_TYPE;\naddr_val = mem_addr.u.int_val;\nif (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\nmemory[addr_val] = {val_code};\n"));
                     c
                 }
                 MemoryOp::Load { target, address } => {
                     let (mut c, addr_val) = self.generate_expr(address);
-                    c.push_str(&format!("mem_addr = {addr_val};\n"));
-                    c.push_str("if (mem_addr.type != TYPE_INT) return ERR_TYPE;\n");
-                    c.push_str("addr_val = mem_addr.u.int_val;\n");
-                    c.push_str("if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\n");
-                    c.push_str(&format!("v_{target} = memory[addr_val];\n"));
+                    c.push_str(&format!("mem_addr = {addr_val};\nif (mem_addr.type != TYPE_INT) return ERR_TYPE;\naddr_val = mem_addr.u.int_val;\nif (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\nv_{target} = memory[addr_val];\n"));
                     c
                 }
             },
@@ -618,19 +537,8 @@ impl<'a> CodeBuilder<'a> {
                 let (val_code, val_expr) = self.generate_expr(&cond_mod.value);
                 c.push_str(&val_code);
 
-                c.push_str(&format!(
-                    "if ({lhs_val}.type != TYPE_INT) return ERR_TYPE;\n"
-                ));
-                c.push_str(&format!(
-                    "if ({rhs_val}.type != TYPE_INT) return ERR_TYPE;\n"
-                ));
-
                 let comp_op = self.get_comp_op_str(&cond_mod.condition.op);
-                c.push_str(&format!(
-                    "if ({lhs_val}.u.int_val {comp_op} {rhs_val}.u.int_val) {{\n"
-                ));
-                c.push_str(&format!("v_{} = {};\n", cond_mod.target, val_expr));
-                c.push_str("}\n");
+                c.push_str(&format!("if ({lhs_val}.type != TYPE_INT) return ERR_TYPE;\nif ({rhs_val}.type != TYPE_INT) return ERR_TYPE;\nif ({lhs_val}.u.int_val {comp_op} {rhs_val}.u.int_val) {{\nv_{} = {};\n}}\n", cond_mod.target, val_expr));
                 c
             }
         }
@@ -667,29 +575,14 @@ impl<'a> CodeBuilder<'a> {
         if let Some(expr) = &ret.value {
             let (setup_code, val) = self.generate_expr(expr);
             c.push_str(&setup_code);
-            c.push_str(&format!("ret_val = {val};\n"));
-            c.push_str("// Push the value\n");
-            c.push_str("if (sp >= capacity) {\n");
-            c.push_str("capacity *= 2;\n");
-            c.push_str("stack = realloc(stack, capacity * sizeof(Value));\n");
-            c.push_str("if (!stack) goto end_with_error_alloc;\n");
-            c.push_str("}\n");
-            c.push_str("stack[sp++] = ret_val;\n");
+            c.push_str(&format!("ret_val = {val};\n// Push the value\nif (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) goto end_with_error_alloc;\n}}\nstack[sp++] = ret_val;\n"));
         }
-        c.push_str("// Then ret logic\n");
-        c.push_str("if (sp == 0) goto end;\n");
         let ret_top_name = if *ret_top_count == 1 {
             "ret_top".to_string()
         } else {
             format!("ret_top{ret_top_count}")
         };
-        c.push_str(&format!("{ret_top_name} = stack[sp - 1];\n"));
-        c.push_str(&format!(
-            "if ({ret_top_name}.type != TYPE_LABEL) goto end;\n"
-        ));
-        c.push_str("sp--;  // pop\n");
-        c.push_str(&format!("pc = {ret_top_name}.u.label_val;\n"));
-        c.push_str("goto *pc;\n");
+        c.push_str(&format!("// Then ret logic\nif (sp == 0) goto end;\n{ret_top_name} = stack[sp - 1];\nif ({ret_top_name}.type != TYPE_LABEL) goto end;\nsp--;  // pop\npc = {ret_top_name}.u.label_val;\ngoto *pc;\n"));
         c
     }
 
@@ -701,8 +594,9 @@ impl<'a> CodeBuilder<'a> {
             c.push_str(&setup);
             args_vals.push(val);
         }
-        c.push_str("#pragma GCC diagnostic push\n");
-        c.push_str("#pragma GCC diagnostic ignored \"-Wint-conversion\"\n");
+        c.push_str(
+            "#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wint-conversion\"\n",
+        );
         let mut unpacks = Vec::new();
         self.gen_call_branch(&mut c, 0, &mut unpacks, &args_vals, call.callee);
         c.push_str("#pragma GCC diagnostic pop\n");
@@ -723,9 +617,8 @@ impl<'a> CodeBuilder<'a> {
         callee: &'a str,
     ) {
         if arg_index == args_vals.len() {
-            c.push_str("call_ret.type = TYPE_INT;\n");
             c.push_str(&format!(
-                "call_ret.u.int_val = {}({});\n",
+                "call_ret.type = TYPE_INT;\ncall_ret.u.int_val = {}({});\n",
                 callee,
                 unpacks.join(", ")
             ));
@@ -745,9 +638,7 @@ impl<'a> CodeBuilder<'a> {
             unpacks.pop();
             c.push_str("}\n");
         }
-        c.push_str("else {\n");
-        c.push_str("return ERR_TYPE;\n");
-        c.push_str("}\n");
+        c.push_str("else {\nreturn ERR_TYPE;\n}\n");
     }
 
     fn generate_expr(&self, expr: &Expression) -> (String, String) {
@@ -776,8 +667,6 @@ impl<'a> CodeBuilder<'a> {
                 let (code1, val1) = self.generate_expr(&b.lhs);
                 let (code2, val2) = self.generate_expr(&b.rhs);
                 let mut code = code1 + &code2;
-                code.push_str(&format!("if ({val1}.type != TYPE_INT) return ERR_TYPE;\n"));
-                code.push_str(&format!("if ({val2}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let op_str = match b.op {
                     BinOp::Add => "+",
                     BinOp::Sub => "-",
@@ -790,6 +679,7 @@ impl<'a> CodeBuilder<'a> {
                     BinOp::Shl => "<<",
                     BinOp::Shr => ">>",
                 };
+                code.push_str(&format!("if ({val1}.type != TYPE_INT) return ERR_TYPE;\nif ({val2}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let val = format!(
                     "(Value){{.type = TYPE_INT, .u = {{.int_val = {val1}.u.int_val {op_str} {val2}.u.int_val}}}}"
                 );
@@ -798,10 +688,10 @@ impl<'a> CodeBuilder<'a> {
             Expression::Unary(u) => {
                 let (code, val) = self.generate_expr(&u.operand);
                 let mut c = code;
-                c.push_str(&format!("if ({val}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let op_str = match u.op {
                     UnaryOp::Not => "!",
                 };
+                c.push_str(&format!("if ({val}.type != TYPE_INT) return ERR_TYPE;\n"));
                 let res = format!(
                     "(Value){{.type = TYPE_INT, .u = {{.int_val = {op_str}{val}.u.int_val}}}}"
                 );
@@ -810,22 +700,14 @@ impl<'a> CodeBuilder<'a> {
             Expression::StackRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("off = {val};\n"));
-                code.push_str("if (off.type != TYPE_INT) return ERR_TYPE;\n");
-                code.push_str("off_val = off.u.int_val;\n");
-                code.push_str("if (off_val < 0 || off_val >= sp) return ERR_BOUNDS;\n");
+                code.push_str(&format!("off = {val};\nif (off.type != TYPE_INT) return ERR_TYPE;\noff_val = off.u.int_val;\nif (off_val < 0 || off_val >= sp) return ERR_BOUNDS;\n"));
                 let val = "stack[sp - 1 - off_val]".to_string();
                 (code, val)
             }
             Expression::MemoryRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("mem_off = {val};\n"));
-                code.push_str("if (mem_off.type != TYPE_INT) return ERR_TYPE;\n");
-                code.push_str("mem_off_val = mem_off.u.int_val;\n");
-                code.push_str(
-                    "if (mem_off_val < 0 || mem_off_val >= MEMORY_SIZE) return ERR_MEMORY;\n",
-                );
+                code.push_str(&format!("mem_off = {val};\nif (mem_off.type != TYPE_INT) return ERR_TYPE;\nmem_off_val = mem_off.u.int_val;\nif (mem_off_val < 0 || mem_off_val >= MEMORY_SIZE) return ERR_MEMORY;\n"));
                 let val = "memory[mem_off_val]".to_string();
                 (code, val)
             }
