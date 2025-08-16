@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _; // bring fmt::Write for write! on String
 
 use crate::compiler::{
     ast::{
@@ -15,30 +17,44 @@ pub struct CodeBuilder<'a> {
     need_vars: bool,
     need_includes: bool,
     need_main: bool,
+    gadget_names: HashSet<&'a str>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-enum TempVar {
-    PeekOff,
-    PeekOffVal,
-    SwapLeft,
-    SwapLeftVal,
-    SwapRight,
-    SwapRightVal,
-    SwapTemp,
-    BinRes,
-    AddrVal,
-    CallRet,
-    Off,
-    OffVal,
-    RetVal,
-    MemOff,
-    MemOffVal,
-    UnaryRes,
+bitflags::bitflags! {
+    #[derive(Default)]
+    struct TempVars: u32 {
+        const PEEK_OFF        = 1 << 0;
+        const PEEK_OFF_VAL    = 1 << 1;
+        const SWAP_LEFT       = 1 << 2;
+        const SWAP_LEFT_VAL   = 1 << 3;
+        const SWAP_RIGHT      = 1 << 4;
+        const SWAP_RIGHT_VAL  = 1 << 5;
+        const SWAP_TEMP       = 1 << 6;
+        const BIN_RES         = 1 << 7;
+        const ADDR_VAL        = 1 << 8;
+        const CALL_RET        = 1 << 9;
+        const OFF             = 1 << 10;
+        const OFF_VAL         = 1 << 11;
+        const RET_VAL         = 1 << 12;
+        const MEM_OFF         = 1 << 13;
+        const MEM_OFF_VAL     = 1 << 14;
+        const UNARY_RES       = 1 << 15;
+    }
+}
+
+#[inline]
+const fn grow_stack_snippet() -> &'static str {
+    "if (sp >= capacity) {
+capacity *= 2;
+stack = realloc(stack, capacity * sizeof(Value));
+if (!stack) goto end_with_error_alloc;
+}
+"
 }
 
 impl<'a> CodeBuilder<'a> {
     pub fn new(ast: &'a Program) -> Self {
+        let gadget_names = ast.gadgets.iter().map(|g| g.name).collect::<HashSet<_>>();
         CodeBuilder {
             ast,
             need_defines: false,
@@ -46,6 +62,7 @@ impl<'a> CodeBuilder<'a> {
             need_vars: false,
             need_includes: false,
             need_main: false,
+            gadget_names,
         }
     }
 
@@ -156,7 +173,7 @@ impl<'a> CodeBuilder<'a> {
     ) {
         match expr {
             Expression::Identifier(id) => {
-                if self.ast.gadgets.iter().any(|g| &g.name == id) {
+                if self.gadget_names.contains(id) {
                     refs.insert(id);
                 }
             }
@@ -182,109 +199,111 @@ impl<'a> CodeBuilder<'a> {
         }
     }
 
-    fn analyze_used_variables(&self) -> std::collections::HashSet<TempVar> {
-        let mut used = std::collections::HashSet::new();
-
+    fn analyze_used_variables(&self) -> TempVars {
+        let mut used = TempVars::default();
         for gadget in &self.ast.gadgets {
             for instr in &gadget.body.instructions {
-                self.collect_used_vars_from_instr(instr, &mut used);
+                self.collect_used_vars_from_instr_mask(instr, &mut used);
             }
             if let Some(ret_expr) = &gadget.body.ret.value {
-                self.collect_used_vars_from_expr(ret_expr, &mut used);
+                self.collect_used_vars_from_expr_mask(ret_expr, &mut used);
             }
         }
-
         used
     }
 
-    fn collect_used_vars_from_instr(
-        &self,
-        instr: &Instruction,
-        used: &mut std::collections::HashSet<TempVar>,
-    ) {
+    fn collect_used_vars_from_instr_mask(&self, instr: &Instruction, used: &mut TempVars) {
         match instr {
             Instruction::StackOp(StackOp::Peek { .. }) => {
-                used.insert(TempVar::PeekOff);
-                used.insert(TempVar::PeekOffVal);
+                used.insert(TempVars::PEEK_OFF | TempVars::PEEK_OFF_VAL);
             }
             Instruction::StackOp(StackOp::Swap { .. }) => {
-                used.insert(TempVar::SwapLeft);
-                used.insert(TempVar::SwapLeftVal);
-                used.insert(TempVar::SwapRight);
-                used.insert(TempVar::SwapRightVal);
-                used.insert(TempVar::SwapTemp);
+                used.insert(
+                    TempVars::SWAP_LEFT
+                        | TempVars::SWAP_LEFT_VAL
+                        | TempVars::SWAP_RIGHT
+                        | TempVars::SWAP_RIGHT_VAL
+                        | TempVars::SWAP_TEMP,
+                );
             }
             Instruction::Arithmetic(_) => {
-                used.insert(TempVar::BinRes);
+                used.insert(TempVars::BIN_RES);
             }
             Instruction::MemoryOp(_) => {
-                used.insert(TempVar::AddrVal);
+                used.insert(TempVars::ADDR_VAL);
             }
             Instruction::ConditionalMod(cond_mod) => {
-                self.collect_used_vars_from_expr(&cond_mod.condition.lhs, used);
-                self.collect_used_vars_from_expr(&cond_mod.condition.rhs, used);
-                self.collect_used_vars_from_expr(&cond_mod.value, used);
+                self.collect_used_vars_from_expr_mask(&cond_mod.condition.lhs, used);
+                self.collect_used_vars_from_expr_mask(&cond_mod.condition.rhs, used);
+                self.collect_used_vars_from_expr_mask(&cond_mod.value, used);
             }
             Instruction::Assignment(ass) => {
-                self.collect_used_vars_from_expr(&ass.value, used);
+                self.collect_used_vars_from_expr_mask(&ass.value, used);
             }
-
             Instruction::Call(_) => {
-                used.insert(TempVar::CallRet);
+                used.insert(TempVars::CALL_RET);
             }
             _ => {}
         }
     }
 
-    fn collect_used_vars_from_expr(
-        &self,
-        expr: &Expression,
-        used: &mut std::collections::HashSet<TempVar>,
-    ) {
+    fn collect_used_vars_from_expr_mask(&self, expr: &Expression, used: &mut TempVars) {
         match expr {
             Expression::StackRef(_) => {
-                used.insert(TempVar::Off);
-                used.insert(TempVar::OffVal);
-                used.insert(TempVar::RetVal);
+                used.insert(TempVars::OFF | TempVars::OFF_VAL | TempVars::RET_VAL);
             }
             Expression::MemoryRef(_) => {
-                used.insert(TempVar::MemOff);
-                used.insert(TempVar::MemOffVal);
+                used.insert(TempVars::MEM_OFF | TempVars::MEM_OFF_VAL);
             }
             Expression::Binary(bin) => {
-                self.collect_used_vars_from_expr(&bin.lhs, used);
-                self.collect_used_vars_from_expr(&bin.rhs, used);
+                self.collect_used_vars_from_expr_mask(&bin.lhs, used);
+                self.collect_used_vars_from_expr_mask(&bin.rhs, used);
             }
             Expression::Unary(_) => {
-                used.insert(TempVar::UnaryRes);
+                used.insert(TempVars::UNARY_RES);
             }
             Expression::Call(_) => {
-                used.insert(TempVar::CallRet);
+                used.insert(TempVars::CALL_RET);
             }
             _ => {}
         }
+    }
+
+    fn estimate_size(ast: &Program) -> usize {
+        let insns: usize = ast.gadgets.iter().map(|g| g.body.instructions.len()).sum();
+        256 + insns * 256 + ast.gadgets.len() * 256
     }
 
     pub fn build(self) -> String {
-        let mut code = String::new();
+        let mut code = String::with_capacity(Self::estimate_size(self.ast));
 
         if self.need_defines {
-            code.push_str(&format!("{}\n", super::constants::DEFINES));
+            code.push_str(super::constants::DEFINES);
+            code.push('\n');
         }
 
         if self.need_typedefs {
-            code.push_str(&format!("{}\n", super::constants::TYPEDEFS));
+            code.push_str(super::constants::TYPEDEFS);
+            code.push('\n');
         }
 
         if self.need_includes {
-            let mut includes = String::from("#include <stdlib.h>\n");
+            let mut includes = String::with_capacity(self.ast.headers.len() * 32 + 64);
+            includes.push_str("#include <stdlib.h>\n");
             for header in &self.ast.headers {
                 match header {
                     Header::System(parts) => {
-                        includes.push_str(&format!("#include <{}>\n", parts.join(".")));
+                        let mut path = String::new();
+                        for (i, p) in parts.iter().enumerate() {
+                            if i > 0 {
+                                path.push('.');
+                            }
+                            path.push_str(p);
+                        }
+                        let _ = write!(includes, "#include <{}>\n", path);
                     }
                     Header::User(s) => {
-                        includes.push_str(&format!("#include \"{s}\"\n"));
+                        let _ = write!(includes, "#include \"{}\"\n", s);
                     }
                 }
             }
@@ -294,87 +313,141 @@ impl<'a> CodeBuilder<'a> {
 
         if self.need_vars {
             let vars = self.populate_variables(self.ast);
-            code.push_str(&format!("{}\n", vars));
+            code.push_str(&vars);
+            code.push('\n');
         }
 
         if self.need_main {
             let mut main_code = String::from("int main() {\n");
-            main_code.push_str("Value *stack = malloc(INITIAL_CAPACITY * sizeof(Value));\n");
-            main_code.push_str("if (!stack) return ERR_ALLOC;\n");
-            main_code.push_str("int sp = 0;\n");
-            main_code.push_str("int capacity = INITIAL_CAPACITY;\n\n");
-            main_code.push_str("// Variable declarations for C99 compliance\n");
+            main_code.push_str(
+                "Value *stack = malloc(INITIAL_CAPACITY * sizeof(Value));
+                if (!stack) return ERR_ALLOC;
+                int sp = 0;
+                int capacity = INITIAL_CAPACITY;
+                // Variable declarations for C99 compliance\n",
+            );
 
             let used_vars = self.analyze_used_variables();
-            if used_vars.contains(&TempVar::Off) {
-                main_code.push_str("Value off;\nlong long off_val;\n");
+            if used_vars.contains(TempVars::OFF) {
+                main_code.push_str(
+                    "Value off;
+                    long long off_val;",
+                );
             }
-            if used_vars.contains(&TempVar::MemOff) {
-                main_code.push_str("Value mem_off;\nlong long mem_off_val;\n");
+            if used_vars.contains(TempVars::MEM_OFF) {
+                main_code.push_str(
+                    "Value mem_off;
+                    long long mem_off_val;",
+                );
             }
-            if used_vars.contains(&TempVar::PeekOff) {
-                main_code.push_str("Value peek_off;\nlong long peek_off_val;\n");
+            if used_vars.contains(TempVars::PEEK_OFF) {
+                main_code.push_str(
+                    "Value peek_off;
+                    long long peek_off_val;",
+                );
             }
-            if used_vars.contains(&TempVar::SwapLeft) {
-                main_code.push_str("Value swap_left;\nlong long swap_left_val;\nValue swap_right;\nlong long swap_right_val;\nValue swap_temp;\n");
+            if used_vars.contains(TempVars::SWAP_LEFT) {
+                main_code.push_str(
+                    "Value swap_left;
+                    long long swap_left_val;
+                    Value swap_right;
+                    long long swap_right_val;
+                    Value swap_temp;",
+                );
             }
-            if used_vars.contains(&TempVar::RetVal) {
+            if used_vars.contains(TempVars::RET_VAL) {
                 main_code.push_str("Value ret_val;\n");
             }
             main_code.push_str("Value next;\n");
-            if used_vars.contains(&TempVar::BinRes) {
+            if used_vars.contains(TempVars::BIN_RES) {
                 main_code.push_str("Value bin_res;\n");
             }
-            if used_vars.contains(&TempVar::AddrVal) {
-                main_code.push_str("Value mem_addr;\nlong long addr_val;\n");
+            if used_vars.contains(TempVars::ADDR_VAL) {
+                main_code.push_str(
+                    "Value mem_addr;
+                    long long addr_val;",
+                );
             }
-            if used_vars.contains(&TempVar::UnaryRes) {
+            if used_vars.contains(TempVars::UNARY_RES) {
                 main_code.push_str("Value unary_res;\n");
             }
-            if used_vars.contains(&TempVar::CallRet) {
+            if used_vars.contains(TempVars::CALL_RET) {
                 main_code.push_str("Value call_ret;\n");
             }
-            let num_gadgets = self.ast.gadgets.len();
-            for i in 1..=num_gadgets {
-                let var_name = if i == 1 {
-                    "ret_top".to_string()
-                } else {
-                    format!("ret_top{i}")
-                };
-                main_code.push_str(&format!("Value {var_name};\n"));
-            }
+            main_code.push_str("Value ret_top;\n");
             main_code.push('\n');
 
             // Add memory array if memory operations are used
-            if used_vars.contains(&TempVar::AddrVal) || used_vars.contains(&TempVar::MemOff) {
-                main_code.push_str("// Memory array for load/store operations\nValue memory[MEMORY_SIZE];\n// Initialize memory to zero\nfor (int i = 0; i < MEMORY_SIZE; i++) {\nmemory[i] = (Value){.type = TYPE_INT, .u = {.int_val = 0LL}};\n}\n\n");
+            if used_vars.contains(TempVars::ADDR_VAL) || used_vars.contains(TempVars::MEM_OFF) {
+                main_code.push_str(
+                    "// Memory array for load/store operations
+                    Value memory[MEMORY_SIZE];
+                    // Initialize memory to zero
+                    for (int i = 0; i < MEMORY_SIZE; i++) {
+                    memory[i] = (Value){.type = TYPE_INT, .u = {.int_val = 0LL}};
+                    }\n\n",
+                );
             }
 
             main_code.push_str("// Initialize stack from stack_init ([main] bottom to top)\n");
             for id in &self.ast.stack_init.initial {
-                main_code.push_str(&format!("if (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) return ERR_ALLOC;\n}}\nstack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{id}_start}}}};\n"));
+                let _ = write!(
+                    main_code,
+                    "{}stack[sp++] = (Value){{.type = TYPE_LABEL, .u = {{.label_val = &&g_{}_start}}}};\n",
+                    grow_stack_snippet(),
+                    id
+                );
             }
-            main_code.push_str("\nvoid *pc = &&start;\ngoto *pc;\n\nstart:\nif (sp <= 0) goto end;\nnext = stack[--sp];\nif (next.type != TYPE_LABEL) return ERR_TYPE;\npc = next.u.label_val;\ngoto *pc;\n\n");
+            main_code.push_str(
+                "void *pc = &&start;
+                goto *pc;
+                \n\n
+                start:
+                if (sp <= 0) goto end;
+                next = stack[--sp];
+                if (next.type != TYPE_LABEL) return ERR_TYPE;
+                pc = next.u.label_val;
+                goto *pc;
+                \n\n",
+            );
 
-            let mut ret_top_count = 1u32;
             let referenced_gadgets = self.find_referenced_gadgets();
 
             for gadget in &self.ast.gadgets {
                 if gadget.name == "main" || referenced_gadgets.contains(&gadget.name) {
-                    main_code.push_str(&self.generate_gadget_code(gadget, &mut ret_top_count));
+                    main_code.push_str(&self.generate_gadget_code(gadget));
                 } else {
-                    main_code.push_str(&format!("#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wunused-label\"\n{}#pragma GCC diagnostic pop\n", self.generate_gadget_code(gadget, &mut ret_top_count)));
+                    let body = self.generate_gadget_code(gadget);
+                    main_code.push_str("#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wunused-label\"\n");
+                    main_code.push_str(&body);
+                    main_code.push_str("#pragma GCC diagnostic pop\n");
                 }
             }
 
-            main_code.push_str("end_with_error_alloc:\nfree(stack);\nreturn ERR_ALLOC;\n\nend:\nif (sp > 0) {\nif (stack[sp - 1].type == TYPE_INT) {\nprintf(\"finish %lld\", stack[sp - 1].u.int_val);\n} else {\nfree(stack);\nreturn ERR_TYPE;\n}\n}\nfree(stack);\nreturn ERR_SUCCESS;\n}\n");
+            main_code.push_str(
+                "end_with_error_alloc:
+                free(stack);
+                return ERR_ALLOC;
+                end:
+                if (sp > 0) {
+                if (stack[sp - 1].type == TYPE_INT) {
+                printf(\"finish %lld\", stack[sp - 1].u.int_val);
+                } else {
+                free(stack);
+                return ERR_TYPE;
+                }
+                }
+                free(stack);
+                return ERR_SUCCESS;
+                }\n",
+            );
             code.push_str(&main_code);
         }
 
         code
     }
 
-    fn generate_gadget_code(&self, gadget: &GadgetDef, ret_top_count: &mut u32) -> String {
+    fn generate_gadget_code(&self, gadget: &GadgetDef) -> String {
         let mut code = String::new();
         let gadget_name = &gadget.name;
         let instructions = &gadget.body.instructions;
@@ -385,12 +458,13 @@ impl<'a> CodeBuilder<'a> {
 
             for i in instructions.iter().skip(1) {
                 let proposed = self.suffix_for_instr(i);
-                let count = suffix_counts.entry(proposed.clone()).or_insert(0);
+                let key = proposed.into_owned();
+                let count = suffix_counts.entry(key.clone()).or_insert(0);
                 *count += 1;
                 let suff = if *count == 1 {
-                    proposed
+                    key
                 } else {
-                    format!("{proposed}_{count}")
+                    format!("{key}_{count}")
                 };
                 suffixes.push(suff);
             }
@@ -407,46 +481,56 @@ impl<'a> CodeBuilder<'a> {
 
             for i in 0..instructions.len() {
                 let label_suff = &suffixes[i];
-                code.push_str(&format!("g_{gadget_name}_{label_suff}:\n// {}\n{}pc = &&g_{gadget_name}_{};\ngoto *pc;\n\n",
+                let _ = write!(
+                    code,
+                    "g_{}_{}:\n// {}\n{}pc = &&g_{}_{};\ngoto *pc;\n\n",
+                    gadget_name,
+                    label_suff,
                     self.comment_for_instr(&instructions[i]),
                     self.generate_instr_code(&instructions[i]),
+                    gadget_name,
                     suffixes[i + 1]
-                ));
+                );
             }
 
             let ret_label_suff = &suffixes[instructions.len()];
-            code.push_str(&format!(
-                "g_{gadget_name}_{ret_label_suff}:\n{}",
-                self.generate_ret_code(&gadget.body.ret, ret_top_count)
-            ));
+            let _ = write!(
+                code,
+                "g_{}_{}:\n{}",
+                gadget_name,
+                ret_label_suff,
+                self.generate_ret_code(&gadget.body.ret)
+            );
         } else {
-            code.push_str(&format!(
-                "g_{gadget_name}_start:\n{}",
-                self.generate_ret_code(&gadget.body.ret, ret_top_count)
-            ));
+            let _ = write!(
+                code,
+                "g_{}_start:\n{}",
+                gadget_name,
+                self.generate_ret_code(&gadget.body.ret)
+            );
         }
-
-        *ret_top_count += 1;
 
         code
     }
 
-    fn suffix_for_instr(&self, instr: &Instruction) -> String {
+    fn suffix_for_instr(&self, instr: &Instruction) -> Cow<'static, str> {
         match instr {
-            Instruction::Assignment(_) => "assign".to_string(),
-            Instruction::Arithmetic(_) => "arith".to_string(),
+            Instruction::Assignment(_) => Cow::Borrowed("assign"),
+            Instruction::Arithmetic(_) => Cow::Borrowed("arith"),
             Instruction::StackOp(StackOp::Push(expr)) => match expr {
-                Expression::Literal(Literal::Int(i)) => format!("push{i}"),
-                Expression::Identifier(id) if self.is_gadget(id) => format!("push_{id}"),
-                _ => "push".to_string(),
+                Expression::Literal(Literal::Int(i)) => Cow::Owned(format!("push{i}")),
+                Expression::Identifier(id) if self.is_gadget(id) => {
+                    Cow::Owned(format!("push_{id}"))
+                }
+                _ => Cow::Borrowed("push"),
             },
-            Instruction::StackOp(StackOp::Pop(_)) => "pop".to_string(),
-            Instruction::StackOp(StackOp::Peek { .. }) => "peek".to_string(),
-            Instruction::StackOp(StackOp::Swap { .. }) => "swap".to_string(),
-            Instruction::MemoryOp(MemoryOp::Store { .. }) => "store".to_string(),
-            Instruction::MemoryOp(MemoryOp::Load { .. }) => "load".to_string(),
-            Instruction::ConditionalMod(_) => "cond".to_string(),
-            Instruction::Call(_) => "call".to_string(),
+            Instruction::StackOp(StackOp::Pop(_)) => Cow::Borrowed("pop"),
+            Instruction::StackOp(StackOp::Peek { .. }) => Cow::Borrowed("peek"),
+            Instruction::StackOp(StackOp::Swap { .. }) => Cow::Borrowed("swap"),
+            Instruction::MemoryOp(MemoryOp::Store { .. }) => Cow::Borrowed("store"),
+            Instruction::MemoryOp(MemoryOp::Load { .. }) => Cow::Borrowed("load"),
+            Instruction::ConditionalMod(_) => Cow::Borrowed("cond"),
+            Instruction::Call(_) => Cow::Borrowed("call"),
         }
     }
 
@@ -479,7 +563,14 @@ impl<'a> CodeBuilder<'a> {
         match instr {
             Instruction::StackOp(StackOp::Push(expr)) => {
                 let (mut c, val) = self.generate_expr(expr);
-                c.push_str(&format!("if (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) goto end_with_error_alloc;\n}}\nstack[sp++] = {val};\n"));
+                c.push_str(&format!(
+                    "if (sp >= capacity) {{
+                    capacity *= 2;
+                    stack = realloc(stack, capacity * sizeof(Value));
+                    if (!stack) goto end_with_error_alloc;
+                    }}
+                    stack[sp++] = {val};\n"
+                ));
                 c
             }
             Instruction::StackOp(StackOp::Pop(target)) => {
@@ -487,14 +578,32 @@ impl<'a> CodeBuilder<'a> {
             }
             Instruction::StackOp(StackOp::Peek { target, offset }) => {
                 let (mut c, val) = self.generate_expr(offset);
-                c.push_str(&format!("peek_off = {val};\nif (peek_off.type != TYPE_INT) return ERR_TYPE;\npeek_off_val = peek_off.u.int_val;\nif (peek_off_val < 0 || peek_off_val >= sp) return ERR_BOUNDS;\nv_{target} = stack[sp - 1 - peek_off_val];\n"));
+                c.push_str(&format!(
+                    "peek_off = {val};
+                    if (peek_off.type != TYPE_INT) return ERR_TYPE;
+                    peek_off_val = peek_off.u.int_val;
+                    if (peek_off_val < 0 || peek_off_val >= sp) return ERR_BOUNDS;
+                    v_{target} = stack[sp - 1 - peek_off_val];\n"
+                ));
                 c
             }
             Instruction::StackOp(StackOp::Swap { left, right }) => {
                 let (mut c, left_val) = self.generate_expr(left);
                 let (right_code, right_val) = self.generate_expr(right);
                 c.push_str(&right_code);
-                c.push_str(&format!("swap_left = {left_val};\nif (swap_left.type != TYPE_INT) return ERR_TYPE;\nswap_left_val = swap_left.u.int_val;\nif (swap_left_val < 0 || swap_left_val >= sp) return ERR_BOUNDS;\nswap_right = {right_val};\nif (swap_right.type != TYPE_INT) return ERR_TYPE;\nswap_right_val = swap_right.u.int_val;\nif (swap_right_val < 0 || swap_right_val >= sp) return ERR_BOUNDS;\nswap_temp = stack[sp - 1 - swap_left_val];\nstack[sp - 1 - swap_left_val] = stack[sp - 1 - swap_right_val];\nstack[sp - 1 - swap_right_val] = swap_temp;\n"));
+                c.push_str(&format!(
+                    "swap_left = {left_val};
+                    if (swap_left.type != TYPE_INT) return ERR_TYPE;
+                    swap_left_val = swap_left.u.int_val;
+                    if (swap_left_val < 0 || swap_left_val >= sp) return ERR_BOUNDS;
+                    swap_right = {right_val};
+                    if (swap_right.type != TYPE_INT) return ERR_TYPE;
+                    swap_right_val = swap_right.u.int_val;
+                    if (swap_right_val < 0 || swap_right_val >= sp) return ERR_BOUNDS;
+                    swap_temp = stack[sp - 1 - swap_left_val];
+                    stack[sp - 1 - swap_left_val] = stack[sp - 1 - swap_right_val];
+                    stack[sp - 1 - swap_right_val] = swap_temp;\n"
+                ));
                 c
             }
             Instruction::Assignment(ass) => {
@@ -513,7 +622,14 @@ impl<'a> CodeBuilder<'a> {
                 let inner_op_str = self.get_op_str(&arith.rhs_op);
                 let temp_val = format!("{v1}.u.int_val {inner_op_str} {v2}.u.int_val");
                 let op_str = self.get_op_str(&arith.op);
-                c.push_str(&format!("if ({v1}.type != TYPE_INT) return ERR_TYPE;\nif ({v2}.type != TYPE_INT) return ERR_TYPE;\nbin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {temp_val}}}}};\nif (v_{}.type != TYPE_INT) return ERR_TYPE;\nv_{}.u.int_val = v_{}.u.int_val {} bin_res.u.int_val;\n", arith.dest, arith.dest, arith.dest, op_str));
+                c.push_str(&format!(
+                    "if ({v1}.type != TYPE_INT) return ERR_TYPE;
+                    if ({v2}.type != TYPE_INT) return ERR_TYPE;
+                    bin_res = (Value){{.type = TYPE_INT, .u = {{.int_val = {temp_val}}}}};
+                    if (v_{}.type != TYPE_INT) return ERR_TYPE;
+                    v_{}.u.int_val = v_{}.u.int_val {} bin_res.u.int_val;\n",
+                    arith.dest, arith.dest, arith.dest, op_str
+                ));
                 c
             }
             Instruction::MemoryOp(mem_op) => match mem_op {
@@ -521,12 +637,24 @@ impl<'a> CodeBuilder<'a> {
                     let (mut c, val_code) = self.generate_expr(value);
                     let (addr_code, addr_val) = self.generate_expr(address);
                     c.push_str(&addr_code);
-                    c.push_str(&format!("mem_addr = {addr_val};\nif (mem_addr.type != TYPE_INT) return ERR_TYPE;\naddr_val = mem_addr.u.int_val;\nif (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\nmemory[addr_val] = {val_code};\n"));
+                    c.push_str(&format!(
+                        "mem_addr = {addr_val};
+                        if (mem_addr.type != TYPE_INT) return ERR_TYPE;
+                        addr_val = mem_addr.u.int_val;
+                        if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;
+                        memory[addr_val] = {val_code};\n"
+                    ));
                     c
                 }
                 MemoryOp::Load { target, address } => {
                     let (mut c, addr_val) = self.generate_expr(address);
-                    c.push_str(&format!("mem_addr = {addr_val};\nif (mem_addr.type != TYPE_INT) return ERR_TYPE;\naddr_val = mem_addr.u.int_val;\nif (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;\nv_{target} = memory[addr_val];\n"));
+                    c.push_str(&format!(
+                        "mem_addr = {addr_val};
+                        if (mem_addr.type != TYPE_INT) return ERR_TYPE;
+                        addr_val = mem_addr.u.int_val;
+                        if (addr_val < 0 || addr_val >= MEMORY_SIZE) return ERR_MEMORY;
+                        v_{target} = memory[addr_val];\n"
+                    ));
                     c
                 }
             },
@@ -538,7 +666,12 @@ impl<'a> CodeBuilder<'a> {
                 c.push_str(&val_code);
 
                 let comp_op = self.get_comp_op_str(&cond_mod.condition.op);
-                c.push_str(&format!("if ({lhs_val}.type != TYPE_INT) return ERR_TYPE;\nif ({rhs_val}.type != TYPE_INT) return ERR_TYPE;\nif ({lhs_val}.u.int_val {comp_op} {rhs_val}.u.int_val) {{\nv_{} = {};\n}}\n", cond_mod.target, val_expr));
+                c.push_str(&format!(
+                    "if ({lhs_val}.type != TYPE_INT) return ERR_TYPE;
+                    if ({rhs_val}.type != TYPE_INT) return ERR_TYPE;
+                    if ({lhs_val}.u.int_val {comp_op} {rhs_val}.u.int_val) {{\nv_{} = {};\n}}\n",
+                    cond_mod.target, val_expr
+                ));
                 c
             }
         }
@@ -570,19 +703,28 @@ impl<'a> CodeBuilder<'a> {
         }
     }
 
-    fn generate_ret_code(&self, ret: &ReturnStmt, ret_top_count: &mut u32) -> String {
+    fn generate_ret_code(&self, ret: &ReturnStmt) -> String {
         let mut c = String::new();
         if let Some(expr) = &ret.value {
             let (setup_code, val) = self.generate_expr(expr);
             c.push_str(&setup_code);
-            c.push_str(&format!("ret_val = {val};\n// Push the value\nif (sp >= capacity) {{\ncapacity *= 2;\nstack = realloc(stack, capacity * sizeof(Value));\nif (!stack) goto end_with_error_alloc;\n}}\nstack[sp++] = ret_val;\n"));
+            let _ = write!(
+                c,
+                "ret_val = {val};
+                // Push the value
+                {}stack[sp++] = ret_val;\n",
+                grow_stack_snippet()
+            );
         }
-        let ret_top_name = if *ret_top_count == 1 {
-            "ret_top".to_string()
-        } else {
-            format!("ret_top{ret_top_count}")
-        };
-        c.push_str(&format!("// Then ret logic\nif (sp == 0) goto end;\n{ret_top_name} = stack[sp - 1];\nif ({ret_top_name}.type != TYPE_LABEL) goto end;\nsp--;  // pop\npc = {ret_top_name}.u.label_val;\ngoto *pc;\n"));
+        c.push_str(
+            "// Then ret logic
+            if (sp == 0) goto end;
+            ret_top = stack[sp - 1];
+            if (ret_top.type != TYPE_LABEL) goto end;
+            sp--;  // pop
+            pc = ret_top.u.label_val;
+            goto *pc;\n",
+        );
         c
     }
 
@@ -649,10 +791,15 @@ impl<'a> CodeBuilder<'a> {
                     Literal::Int(i) => {
                         format!("(Value){{.type = TYPE_INT, .u = {{.int_val = {i}LL}}}}")
                     }
-                    Literal::Str(s) => format!(
-                        "(Value){{.type = TYPE_STR, .u = {{.str_val = \"{}\" }}}}",
-                        s.replace("\"", "\\\"")
-                    ),
+                    Literal::Str(s) => {
+                        let mut lit = String::with_capacity(s.len() + 32);
+                        lit.push_str("(Value){.type = TYPE_STR, .u = {.str_val = \"");
+                        for b in s.bytes() {
+                            lit.push(b as char)
+                        }
+                        lit.push_str("\" }}");
+                        lit
+                    }
                 },
             ),
             Expression::Identifier(id) => (
@@ -679,7 +826,10 @@ impl<'a> CodeBuilder<'a> {
                     BinOp::Shl => "<<",
                     BinOp::Shr => ">>",
                 };
-                code.push_str(&format!("if ({val1}.type != TYPE_INT) return ERR_TYPE;\nif ({val2}.type != TYPE_INT) return ERR_TYPE;\n"));
+                code.push_str(&format!(
+                    "if ({val1}.type != TYPE_INT) return ERR_TYPE;
+                    \nif ({val2}.type != TYPE_INT) return ERR_TYPE;\n"
+                ));
                 let val = format!(
                     "(Value){{.type = TYPE_INT, .u = {{.int_val = {val1}.u.int_val {op_str} {val2}.u.int_val}}}}"
                 );
@@ -700,14 +850,24 @@ impl<'a> CodeBuilder<'a> {
             Expression::StackRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("off = {val};\nif (off.type != TYPE_INT) return ERR_TYPE;\noff_val = off.u.int_val;\nif (off_val < 0 || off_val >= sp) return ERR_BOUNDS;\n"));
+                code.push_str(&format!(
+                    "off = {val};
+                    if (off.type != TYPE_INT) return ERR_TYPE;
+                    off_val = off.u.int_val;
+                    if (off_val < 0 || off_val >= sp) return ERR_BOUNDS;\n"
+                ));
                 let val = "stack[sp - 1 - off_val]".to_string();
                 (code, val)
             }
             Expression::MemoryRef(e) => {
                 let (code, val) = self.generate_expr(e);
                 let mut code = code;
-                code.push_str(&format!("mem_off = {val};\nif (mem_off.type != TYPE_INT) return ERR_TYPE;\nmem_off_val = mem_off.u.int_val;\nif (mem_off_val < 0 || mem_off_val >= MEMORY_SIZE) return ERR_MEMORY;\n"));
+                code.push_str(&format!(
+                    "mem_off = {val};
+                    if (mem_off.type != TYPE_INT) return ERR_TYPE;
+                    mem_off_val = mem_off.u.int_val;
+                    if (mem_off_val < 0 || mem_off_val >= MEMORY_SIZE) return ERR_MEMORY;\n"
+                ));
                 let val = "memory[mem_off_val]".to_string();
                 (code, val)
             }
@@ -734,6 +894,6 @@ impl<'a> CodeBuilder<'a> {
     }
 
     fn is_gadget(&self, id: &str) -> bool {
-        self.ast.gadgets.iter().any(|g| g.name == id)
+        self.gadget_names.contains(id)
     }
 }

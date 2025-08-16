@@ -8,6 +8,7 @@ resolver = "2"
 
 [dependencies]
 anyhow = "1.0.98"
+bitflags = "2.6"
 clap = { version = "4.5.16", features = ["derive"] }
 hex = "0.4.3"
 miette = { version = "7.5.0", features = ["fancy"] }
